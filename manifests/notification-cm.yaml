@@ -21,7 +21,7 @@ data:
   trigger.on-sync-synced: |
     - when: any(sync.status.conditions, {.type == 'Syncing' && .status == 'False' && .message == 'Sync Completed'})
       oncePer: sync.status.lastSyncedCommit
-      send: [sync-synced]
+      send: [sync-synced-gitlab]
 
   template.sync-synced: |
     message: |
@@ -44,3 +44,21 @@ data:
 
   service.email.gmail: '{ username: $email-username, password: $email-password, host:
       smtp.gmail.com, port: 465, from: $email-username }'
+
+  service.webhook.gitlab: |
+    url: https://gitlab.com
+    headers: #optional headers
+    - name: PRIVATE-TOKEN
+      value: $gitlab-token
+    - name: Content-Type
+      value: application/json
+
+  template.sync-synced-gitlab: |
+    webhook:
+      github:
+        method: POST
+        path: /api/v4/projects/41091119/repository/commits/{{.sync.status.lastSyncedCommit}}/comments
+        body: |
+          {
+            "note": "{{.sync.kind}} {{.sync.metadata.namespace}}/{{.sync.metadata.name}} synced to {{.sync.status.lastSyncedCommit}}"
+          }
