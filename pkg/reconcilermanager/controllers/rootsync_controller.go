@@ -245,8 +245,71 @@ func (r *RootSyncReconciler) Reconcile(ctx context.Context, req controllerruntim
 		return controllerruntime.Result{}, errors.Wrap(err, "ClusterRoleBinding reconcile failed")
 	}
 
-	containerEnvs := r.populateContainerEnvs(ctx, rs, reconcilerRef.Name)
-	mut := r.mutationsFor(ctx, rs, containerEnvs)
+	notificationEnabled, err := r.notificationEnabled(ctx, rs)
+	if err != nil {
+		log.Error(err, "Check notification subscription failed")
+		rootsync.SetStalled(rs, "Notification", err)
+		// check notification subscription errors should always trigger retry (return error),
+		// even if status update is successful.
+		_, updateErr := r.updateStatus(ctx, currentRS, rs)
+		if updateErr != nil {
+			log.Error(updateErr, "Object status update failed",
+				logFieldObject, rsRef.String(),
+				logFieldKind, r.syncKind)
+		}
+		// Use the upsert error for metric tagging.
+		metrics.RecordReconcileDuration(ctx, metrics.StatusTagKey(err), start)
+		return controllerruntime.Result{}, errors.Wrap(err, "Check notification subscription failed")
+	}
+	var notificationCMName string
+	var notificationSecretName string
+	if notificationEnabled {
+		notificationCMName, err = r.mergeNotificationConfigs(ctx, rs.Namespace, rs.Spec.NotificationConfig)
+		if err != nil {
+			log.Error(err, "Merge notification configs failed")
+			rootsync.SetStalled(rs, "Notification", err)
+			// merge errors should always trigger retry (return error),
+			// even if status update is successful.
+			_, updateErr := r.updateStatus(ctx, currentRS, rs)
+			if updateErr != nil {
+				log.Error(updateErr, "Object status update failed",
+					logFieldObject, rsRef.String(),
+					logFieldKind, r.syncKind)
+			}
+			// Use the upsert error for metric tagging.
+			metrics.RecordReconcileDuration(ctx, metrics.StatusTagKey(err), start)
+			return controllerruntime.Result{}, errors.Wrap(err, "Merge notification configs failed")
+		}
+
+		if rs.Spec.NotificationConfig != nil && rs.Spec.NotificationConfig.SecretRef != nil && rs.Spec.NotificationConfig.SecretRef.Name != "" {
+			notificationSecretName = rs.Spec.NotificationConfig.SecretRef.Name
+			_, err = validateSecretExist(ctx,
+				notificationSecretName,
+				rs.Namespace,
+				r.client)
+			if err != nil {
+				log.Error(err, "Secret validation failed",
+					logFieldObject, notificationSecretName,
+					logFieldKind, "Secret",
+					"type", "notification")
+				rootsync.SetStalled(rs, "Secret", err)
+				// Upsert errors should always trigger retry (return error),
+				// even if status update is successful.
+				_, updateErr := r.updateStatus(ctx, currentRS, rs)
+				if updateErr != nil {
+					log.Error(updateErr, "Object status update failed",
+						logFieldObject, rsRef.String(),
+						logFieldKind, r.syncKind)
+				}
+				// Use the upsert error for metric tagging.
+				metrics.RecordReconcileDuration(ctx, metrics.StatusTagKey(err), start)
+				return controllerruntime.Result{}, errors.Wrap(err, "Secret validation failed")
+			}
+		}
+	}
+
+	containerEnvs := r.populateContainerEnvs(ctx, rs, notificationEnabled, reconcilerRef.Name, notificationCMName, notificationSecretName)
+	mut := r.mutationsFor(ctx, rs, notificationEnabled, containerEnvs)
 
 	// Upsert Root reconciler deployment.
 	deployObj, op, err := r.upsertDeployment(ctx, reconcilerRef, labelMap, mut)
@@ -471,10 +534,13 @@ func (r *RootSyncReconciler) mapSecretToRootSyncs(secret client.Object) []reconc
 	return requests
 }
 
-func (r *RootSyncReconciler) populateContainerEnvs(ctx context.Context, rs *v1beta1.RootSync, reconcilerName string) map[string][]corev1.EnvVar {
+func (r *RootSyncReconciler) populateContainerEnvs(ctx context.Context, rs *v1beta1.RootSync, notificationEnabled bool, reconcilerName, notificationCMName, notificationSecretName string) map[string][]corev1.EnvVar {
 	result := map[string][]corev1.EnvVar{
 		reconcilermanager.HydrationController: hydrationEnvs(rs.Spec.SourceType, rs.Spec.Git, rs.Spec.Oci, declared.RootReconciler, reconcilerName, r.hydrationPollingPeriod.String()),
 		reconcilermanager.Reconciler:          append(reconcilerEnvs(r.clusterName, rs.Name, reconcilerName, declared.RootReconciler, rs.Spec.SourceType, rs.Spec.Git, rs.Spec.Oci, rootsync.GetHelmBase(rs.Spec.Helm), r.reconcilerPollingPeriod.String(), rs.Spec.SafeOverride().StatusMode, v1beta1.GetReconcileTimeout(rs.Spec.SafeOverride().ReconcileTimeout), v1beta1.GetAPIServerTimeout(rs.Spec.SafeOverride().APIServerTimeout)), sourceFormatEnv(rs.Spec.SourceFormat)),
+	}
+	if notificationEnabled {
+		result[reconcilermanager.Notification] = notificationEnvs(r.syncKind, rs.Namespace, rs.Name, notificationCMName, notificationSecretName)
 	}
 	switch v1beta1.SourceType(rs.Spec.SourceType) {
 	case v1beta1.GitSource:
@@ -537,7 +603,30 @@ func (r *RootSyncReconciler) validateRootSecret(ctx context.Context, rootSync *v
 	if err != nil {
 		return err
 	}
-	return validateSecretData(rootSync.Spec.Auth, secret)
+	if err = validateSecretData(rootSync.Spec.Auth, secret); err != nil {
+		return err
+	}
+
+	//if rootSync.Spec.NotificationConfig != nil && rootSync.Spec.NotificationConfig.SecretRef != nil && rootSync.Spec.NotificationConfig.SecretRef.Name != "" {
+	//	_, err = validateSecretExist(ctx,
+	//		rootSync.Spec.NotificationConfig.SecretRef.Name,
+	//		rootSync.Namespace,
+	//		r.client)
+	//	if err != nil {
+	//		return err
+	//	}
+	//}
+	//
+	//if rootSync.Spec.CACertSecretRef != nil && rootSync.Spec.CACertSecretRef.Name != "" {
+	//	_, err = validateSecretExist(ctx,
+	//		rootSync.Spec.CACertSecretRef.Name,
+	//		rootSync.Namespace,
+	//		r.client)
+	//	if err != nil {
+	//		return err
+	//	}
+	//}
+	return nil
 }
 
 func (r *RootSyncReconciler) upsertClusterRoleBinding(ctx context.Context, reconcilerRef types.NamespacedName) (client.ObjectKey, error) {
@@ -591,7 +680,7 @@ func (r *RootSyncReconciler) updateStatus(ctx context.Context, currentRS, rs *v1
 	return true, nil
 }
 
-func (r *RootSyncReconciler) mutationsFor(ctx context.Context, rs *v1beta1.RootSync, containerEnvs map[string][]corev1.EnvVar) mutateFn {
+func (r *RootSyncReconciler) mutationsFor(ctx context.Context, rs *v1beta1.RootSync, notificationEnabled bool, containerEnvs map[string][]corev1.EnvVar) mutateFn {
 	return func(obj client.Object) error {
 		d, ok := obj.(*appsv1.Deployment)
 		if !ok {
@@ -707,6 +796,12 @@ func (r *RootSyncReconciler) mutationsFor(ctx context.Context, rs *v1beta1.RootS
 					container.Env = append(container.Env, gitSyncHTTPSProxyEnv(secretName, keys)...)
 					mutateContainerResource(ctx, &container, rs.Spec.Override, string(RootReconcilerType))
 				}
+			case reconcilermanager.Notification:
+				if !notificationEnabled {
+					addContainer = false
+				} else {
+					container.Env = append(container.Env, containerEnvs[container.Name]...)
+				}
 			case metrics.OtelAgentName:
 				// The no-op case to avoid unknown container error after
 				// first-ever reconcile.
@@ -730,4 +825,68 @@ func (r *RootSyncReconciler) mutationsFor(ctx context.Context, rs *v1beta1.RootS
 		templateSpec.Containers = updatedContainers
 		return nil
 	}
+}
+
+// mergeNotificationConfigs combines the user-provided custom configs with the default configs.
+func (r *RootSyncReconciler) mergeNotificationConfigs(ctx context.Context, rsNamespace string, config *v1beta1.NotificationConfig) (string, error) {
+	if config == nil || config.ConfigMapRef == nil || config.ConfigMapRef.Name == "" || config.ConfigMapRef.Name == reconcilermanager.DefaultNotificationCMName {
+		return reconcilermanager.DefaultNotificationCMName, nil
+	}
+	cm := &corev1.ConfigMap{}
+	cmObjectKey := types.NamespacedName{
+		Namespace: rsNamespace,
+		Name:      config.ConfigMapRef.Name,
+	}
+	if err := r.client.Get(ctx, cmObjectKey, cm); err != nil {
+		return "", fmt.Errorf("failed to get the custom notification ConfigMap %s in the %s namespace: %w", cmObjectKey.Name, cmObjectKey.Namespace, err)
+	}
+
+	defaultCM := &corev1.ConfigMap{}
+	defaultCMObjectKey := types.NamespacedName{
+		Namespace: configsync.ControllerNamespace,
+		Name:      reconcilermanager.DefaultNotificationCMName,
+	}
+	if err := r.client.Get(ctx, defaultCMObjectKey, defaultCM); err != nil {
+		return "", fmt.Errorf("failed to get the default notification ConfigMap %s in the %s namespace: %w", defaultCMObjectKey.Name, defaultCMObjectKey.Namespace, err)
+	}
+
+	for key, value := range defaultCM.Data {
+		if _, found := cm.Data[key]; !found {
+			cm.Data[key] = value
+		}
+	}
+
+	if err := r.client.Update(ctx, cm); err != nil {
+		return "", fmt.Errorf("failed to merge the ConfigMap %s in the %s namespace: %w", cm.Name, cm.Namespace, err)
+	}
+	r.log.Info("Merge notification configs successful",
+		logFieldKind, "ConfigMap",
+		logFieldObject, cm.Name)
+	return cm.Name, nil
+}
+
+// notificationEnabled returns whether the notification is enabled for the RootSync.
+func (r *RootSyncReconciler) notificationEnabled(ctx context.Context, rs *v1beta1.RootSync) (bool, error) {
+	for key := range rs.Annotations {
+		if strings.HasPrefix(key, reconcilermanager.SubscribeAnnotationPrefix) {
+			return true, nil
+		}
+	}
+
+	if rs.Spec.NotificationConfig != nil && rs.Spec.NotificationConfig.ConfigMapRef != nil && rs.Spec.NotificationConfig.ConfigMapRef.Name != "" {
+		cm := &corev1.ConfigMap{}
+		cmObjectKey := types.NamespacedName{
+			Namespace: rs.Namespace,
+			Name:      rs.Spec.NotificationConfig.ConfigMapRef.Name,
+		}
+		if err := r.client.Get(ctx, cmObjectKey, cm); err != nil {
+			if apierrors.IsNotFound(err) {
+				return false, nil
+			}
+			return false, err
+		}
+		_, found := cm.Data["subscriptions"]
+		return found, nil
+	}
+	return false, nil
 }

@@ -292,8 +292,66 @@ func (r *RepoSyncReconciler) Reconcile(ctx context.Context, req controllerruntim
 		return controllerruntime.Result{}, errors.Wrap(err, "RoleBinding reconcile failed")
 	}
 
-	containerEnvs := r.populateContainerEnvs(ctx, rs, reconcilerRef.Name)
-	mut := r.mutationsFor(ctx, rs, containerEnvs)
+	notificationEnabled, err := r.notificationEnabled(ctx, rs)
+	if err != nil {
+		log.Error(err, "Check notification subscription failed")
+		reposync.SetStalled(rs, "Notification", err)
+		// check notification subscription errors should always trigger retry (return error),
+		// even if status update is successful.
+		_, updateErr := r.updateStatus(ctx, currentRS, rs)
+		if updateErr != nil {
+			log.Error(updateErr, "Object status update failed",
+				logFieldObject, rsRef.String(),
+				logFieldKind, r.syncKind)
+		}
+		// Use the upsert error for metric tagging.
+		metrics.RecordReconcileDuration(ctx, metrics.StatusTagKey(err), start)
+		return controllerruntime.Result{}, errors.Wrap(err, "Check notification subscription failed")
+	}
+	var notificationCMName string
+	if notificationEnabled {
+		notificationCMName, err = r.mergeNotificationConfigs(ctx, rs.Namespace, rs.Name, rs.Spec.NotificationConfig)
+		if err != nil {
+			log.Error(err, "Merge notification configs failed")
+			reposync.SetStalled(rs, "Notification", err)
+			// merge errors should always trigger retry (return error),
+			// even if status update is successful.
+			_, updateErr := r.updateStatus(ctx, currentRS, rs)
+			if updateErr != nil {
+				log.Error(updateErr, "Object status update failed",
+					logFieldObject, rsRef.String(),
+					logFieldKind, r.syncKind)
+			}
+			// Use the upsert error for metric tagging.
+			metrics.RecordReconcileDuration(ctx, metrics.StatusTagKey(err), start)
+			return controllerruntime.Result{}, errors.Wrap(err, "Merge notification configs failed")
+		}
+	}
+
+	// Create secret in config-management-system namespace using the
+	// existing secret in the reposync.namespace.
+	sRef, err := upsertNotificationSecret(ctx, log, rs, r.client, reconcilerRef, notificationEnabled)
+	if err != nil {
+		log.Error(err, "Managed object upsert failed",
+			logFieldObject, sRef.String(),
+			logFieldKind, "Secret",
+			"type", "notification")
+		reposync.SetStalled(rs, "Secret", err)
+		// Upsert errors should always trigger retry (return error),
+		// even if status update is successful.
+		_, updateErr := r.updateStatus(ctx, currentRS, rs)
+		if updateErr != nil {
+			log.Error(updateErr, "Object status update failed",
+				logFieldObject, rsRef.String(),
+				logFieldKind, r.syncKind)
+		}
+		// Use the upsert error for metric tagging.
+		metrics.RecordReconcileDuration(ctx, metrics.StatusTagKey(err), start)
+		return controllerruntime.Result{}, errors.Wrap(err, "Secret reconcile failed")
+	}
+
+	containerEnvs := r.populateContainerEnvs(ctx, rs, notificationEnabled, reconcilerRef.Name, notificationCMName, sRef.Name)
+	mut := r.mutationsFor(ctx, rs, notificationEnabled, containerEnvs)
 
 	// Upsert Namespace reconciler deployment.
 	deployObj, op, err := r.upsertDeployment(ctx, reconcilerRef, labelMap, mut)
@@ -664,10 +722,13 @@ func requeueRepoSyncRequest(obj client.Object, rs *v1beta1.RepoSync) []reconcile
 	}
 }
 
-func (r *RepoSyncReconciler) populateContainerEnvs(ctx context.Context, rs *v1beta1.RepoSync, reconcilerName string) map[string][]corev1.EnvVar {
+func (r *RepoSyncReconciler) populateContainerEnvs(ctx context.Context, rs *v1beta1.RepoSync, notificationEnabled bool, reconcilerName, notificationCMName, notificationSecretName string) map[string][]corev1.EnvVar {
 	result := map[string][]corev1.EnvVar{
 		reconcilermanager.HydrationController: hydrationEnvs(rs.Spec.SourceType, rs.Spec.Git, rs.Spec.Oci, declared.Scope(rs.Namespace), reconcilerName, r.hydrationPollingPeriod.String()),
 		reconcilermanager.Reconciler:          reconcilerEnvs(r.clusterName, rs.Name, reconcilerName, declared.Scope(rs.Namespace), rs.Spec.SourceType, rs.Spec.Git, rs.Spec.Oci, reposync.GetHelmBase(rs.Spec.Helm), r.reconcilerPollingPeriod.String(), rs.Spec.SafeOverride().StatusMode, v1beta1.GetReconcileTimeout(rs.Spec.SafeOverride().ReconcileTimeout), v1beta1.GetAPIServerTimeout(rs.Spec.SafeOverride().APIServerTimeout)),
+	}
+	if notificationEnabled {
+		result[reconcilermanager.Notification] = notificationEnvs(r.syncKind, rs.Namespace, rs.Name, notificationCMName, notificationSecretName)
 	}
 	switch v1beta1.SourceType(rs.Spec.SourceType) {
 	case v1beta1.GitSource:
@@ -802,7 +863,7 @@ func (r *RepoSyncReconciler) updateStatus(ctx context.Context, currentRS, rs *v1
 	return true, nil
 }
 
-func (r *RepoSyncReconciler) mutationsFor(ctx context.Context, rs *v1beta1.RepoSync, containerEnvs map[string][]corev1.EnvVar) mutateFn {
+func (r *RepoSyncReconciler) mutationsFor(ctx context.Context, rs *v1beta1.RepoSync, notificationEnabled bool, containerEnvs map[string][]corev1.EnvVar) mutateFn {
 	return func(obj client.Object) error {
 		d, ok := obj.(*appsv1.Deployment)
 		if !ok {
@@ -909,6 +970,12 @@ func (r *RepoSyncReconciler) mutationsFor(ctx context.Context, rs *v1beta1.RepoS
 					container.Env = append(container.Env, gitSyncHTTPSProxyEnv(secretName, keys)...)
 					mutateContainerResource(ctx, &container, rs.Spec.Override, string(NamespaceReconcilerType))
 				}
+			case reconcilermanager.Notification:
+				if !notificationEnabled {
+					addContainer = false
+				} else {
+					container.Env = append(container.Env, containerEnvs[container.Name]...)
+				}
 			case metrics.OtelAgentName:
 				// The no-op case to avoid unknown container error after
 				// first-ever reconcile.
@@ -932,4 +999,78 @@ func (r *RepoSyncReconciler) mutationsFor(ctx context.Context, rs *v1beta1.RepoS
 		templateSpec.Containers = updatedContainers
 		return nil
 	}
+}
+
+// mergeNotificationConfigs combines the user-provided custom configs with the default configs.
+func (r *RepoSyncReconciler) mergeNotificationConfigs(ctx context.Context, rsNamespace, rsName string, config *v1beta1.NotificationConfig) (string, error) {
+	if config == nil || config.ConfigMapRef == nil || config.ConfigMapRef.Name == "" {
+		return reconcilermanager.DefaultNotificationCMName, nil
+	}
+	cm := &corev1.ConfigMap{}
+	cmObjectKey := types.NamespacedName{
+		Namespace: rsNamespace,
+		Name:      config.ConfigMapRef.Name,
+	}
+	if err := r.client.Get(ctx, cmObjectKey, cm); err != nil {
+		return "", fmt.Errorf("failed to get the custom notification ConfigMap %s in the %s namespace: %w", cmObjectKey.Name, cmObjectKey.Namespace, err)
+	}
+
+	defaultCM := &corev1.ConfigMap{}
+	defaultCMObjectKey := types.NamespacedName{
+		Namespace: configsync.ControllerNamespace,
+		Name:      reconcilermanager.DefaultNotificationCMName,
+	}
+	if err := r.client.Get(ctx, defaultCMObjectKey, defaultCM); err != nil {
+		return "", fmt.Errorf("failed to get the default notification ConfigMap %s in the %s namespace: %w", defaultCMObjectKey.Name, defaultCMObjectKey.Namespace, err)
+	}
+
+	for key, value := range defaultCM.Data {
+		if _, found := cm.Data[key]; !found {
+			cm.Data[key] = value
+		}
+	}
+
+	cmsCM := &corev1.ConfigMap{}
+	cmsCM.Namespace = configsync.ControllerNamespace
+	cmsCM.Name = ReconcilerResourceName(core.NsReconcilerName(rsNamespace, rsName), cm.Name)
+	op, err := controllerruntime.CreateOrUpdate(ctx, r.client, cmsCM, func() error {
+		cmsCM.Data = cm.Data
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to upsert the merged notification ConfigMap %s in the %s namespace: %w", cmsCM.Name, cmsCM.Namespace, err)
+	}
+	if op != controllerutil.OperationResultNone {
+		r.log.Info("Merge and upsert notification configs successful",
+			logFieldObject, client.ObjectKeyFromObject(cmsCM).String(),
+			logFieldKind, "ConfigMap",
+			logFieldOperation, op)
+	}
+	return cmsCM.Name, nil
+}
+
+// notificationEnabled returns whether the notification is enabled for the RepoSync.
+func (r *RepoSyncReconciler) notificationEnabled(ctx context.Context, rs *v1beta1.RepoSync) (bool, error) {
+	for key := range rs.Annotations {
+		if strings.HasPrefix(key, reconcilermanager.SubscribeAnnotationPrefix) {
+			return true, nil
+		}
+	}
+
+	if rs.Spec.NotificationConfig != nil && rs.Spec.NotificationConfig.ConfigMapRef != nil && rs.Spec.NotificationConfig.ConfigMapRef.Name != "" {
+		cm := &corev1.ConfigMap{}
+		cmObjectKey := types.NamespacedName{
+			Namespace: rs.Namespace,
+			Name:      rs.Spec.NotificationConfig.ConfigMapRef.Name,
+		}
+		if err := r.client.Get(ctx, cmObjectKey, cm); err != nil {
+			if apierrors.IsNotFound(err) {
+				return false, nil
+			}
+			return false, err
+		}
+		_, found := cm.Data["subscriptions"]
+		return found, nil
+	}
+	return false, nil
 }

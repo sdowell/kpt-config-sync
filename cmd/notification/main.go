@@ -3,27 +3,33 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/argoproj/notifications-engine/pkg/api"
 	"github.com/argoproj/notifications-engine/pkg/controller"
 	"github.com/argoproj/notifications-engine/pkg/services"
 	"github.com/pkg/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
+	csclientv1beta1 "kpt.dev/configsync/clientgen/apis/typed/configsync/v1beta1"
 	"kpt.dev/configsync/pkg/api/configsync"
 	"kpt.dev/configsync/pkg/api/configsync/v1beta1"
+	"kpt.dev/configsync/pkg/core"
+	"kpt.dev/configsync/pkg/kinds"
+	"kpt.dev/configsync/pkg/reconcilermanager"
 	"kpt.dev/configsync/pkg/util"
 	"kpt.dev/configsync/pkg/util/log"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -31,28 +37,24 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-const (
-	ApiGroup      = "API_GROUP"
-	ApiVersion    = "API_VERSION"
-	ApiResource   = "API_RESOURCE"
-	ResyncPeriod  = "RESYNC_PERIOD"
-	ConfigMapName = "CONFIGMAP_NAME"
-	SecretName    = "SECRET_NAME"
-	ObjectKey     = "sync"
-)
+const ObjectKey = "sync"
 
 var (
-	apiGroup = flag.String("api-group", util.EnvString(ApiGroup, v1beta1.SchemeGroupVersion.Group),
+	apiGroup = flag.String("api-group", util.EnvString(reconcilermanager.NotificationApiGroup, v1beta1.SchemeGroupVersion.Group),
 		"Group of the Resource for notifications")
-	apiVersion = flag.String("api-version", util.EnvString(ApiVersion, v1beta1.SchemeGroupVersion.Version),
+	apiVersion = flag.String("api-version", util.EnvString(reconcilermanager.NotificationApiVersion, v1beta1.SchemeGroupVersion.Version),
 		"Version of the Resource for notifications")
-	apiResource = flag.String("api-resource", os.Getenv(ApiResource),
+	apiKind = flag.String("api-kind", os.Getenv(reconcilermanager.NotificationApiKind),
 		"Resource information of the Resource for notifications")
-	resyncCheckPeriod = flag.Duration("resync-period", pollingPeriod(ResyncPeriod, time.Minute),
+	resourceName = flag.String("resource-name", os.Getenv(reconcilermanager.NotificationResourceName),
+		"Name of the Resource to be notified")
+	resourceNamespace = flag.String("resource-namespace", os.Getenv(reconcilermanager.NotificationResourceNamespace),
+		"Namespace of the Resource to be notified")
+	resyncCheckPeriod = flag.Duration("resync-period", pollingPeriod(reconcilermanager.NotificationResyncPeriod, time.Minute),
 		"Period of time between checking if the apiResource listener needs a resync")
-	cmName = flag.String("cm-name", os.Getenv(ConfigMapName),
+	cmName = flag.String("cm-name", os.Getenv(reconcilermanager.NotificationConfigMapName),
 		"Name of the ConfigMap for the notification configs")
-	secretName = flag.String("secret-name", os.Getenv(SecretName),
+	secretName = flag.String("secret-name", os.Getenv(reconcilermanager.NotificationSecretName),
 		"Name of the Secret for the notification configs")
 )
 
@@ -98,23 +100,68 @@ func main() {
 	}, configsync.ControllerNamespace, secrets, configMaps)
 
 	// Create notifications controller that handles Kubernetes resources processing
-	csClient := dynamic.NewForConfigOrDie(restConfig).Resource(schema.GroupVersionResource{
-		Group: *apiGroup, Version: *apiVersion, Resource: *apiResource,
-	})
-	csInformer := cache.NewSharedIndexInformer(&cache.ListWatch{
-		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-			return csClient.List(context.Background(), options)
-		},
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			return csClient.Watch(context.Background(), metav1.ListOptions{})
-		},
-	}, &unstructured.Unstructured{}, *resyncCheckPeriod, cache.Indexers{})
-	notificationController := controller.NewController(csClient, csInformer, notificationsFactory)
+	apiResource := fmt.Sprintf("%ss", strings.ToLower(*apiKind))
+	gvr := schema.GroupVersionResource{
+		Group: *apiGroup, Version: *apiVersion, Resource: apiResource,
+	}
+	notificationClient := dynamic.NewForConfigOrDie(restConfig).Resource(gvr)
+
+	fieldsSelector := fields.SelectorFromSet(map[string]string{"metadata.name": *resourceName})
+	csClient, err := csclientv1beta1.NewForConfig(restConfig)
+	if err != nil {
+		klog.Fatal(err)
+	}
+
+	var exampleObject runtime.Object
+	if *apiKind == kinds.RootSyncV1Beta1().Kind {
+		exampleObject = &v1beta1.RootSync{}
+	} else {
+		exampleObject = &v1beta1.RepoSync{}
+	}
+
+	notificationInformer := cache.NewSharedIndexInformer(
+		cache.NewListWatchFromClient(csClient.RESTClient(), apiResource, *resourceNamespace, fieldsSelector),
+		exampleObject, *resyncCheckPeriod, cache.Indexers{})
+
+	notificationController := controller.NewController(notificationClient, notificationInformer, notificationsFactory, controller.WithToUnstructured(func(obj metav1.Object) (*unstructured.Unstructured, error) {
+		switch obj.(type) {
+		case *unstructured.Unstructured:
+			switch *apiKind {
+			case kinds.RootSyncV1Beta1().Kind:
+				rs := &v1beta1.RootSync{}
+				unstructuredContent := obj.(*unstructured.Unstructured).UnstructuredContent()
+				if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredContent, rs); err != nil {
+					return nil, fmt.Errorf("failed to convert the unstructured object into RootSync: %v", err)
+				}
+				return kinds.ToUnstructured(rs, core.Scheme)
+			case kinds.RepoSyncV1Beta1().Kind:
+				rs := &v1beta1.RepoSync{}
+				unstructuredContent := obj.(*unstructured.Unstructured).UnstructuredContent()
+				if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredContent, rs); err != nil {
+					return nil, fmt.Errorf("failed to convert the unstructured object into RepoSync: %v", err)
+				}
+				return kinds.ToUnstructured(rs, core.Scheme)
+			}
+		case *v1beta1.RootSync:
+			rs, ok := obj.(*v1beta1.RootSync)
+			if !ok {
+				return nil, fmt.Errorf("object must be v1beta1.RootSync but is %T", rs)
+			}
+			return kinds.ToUnstructured(rs, core.Scheme)
+		case *v1beta1.RepoSync:
+			rs, ok := obj.(*v1beta1.RepoSync)
+			if !ok {
+				return nil, fmt.Errorf("object must be v1beta1.RepoSync but is %T", rs)
+			}
+			return kinds.ToUnstructured(rs, core.Scheme)
+		}
+		return nil, fmt.Errorf("unknown object type %T", obj)
+	}))
 
 	// Start informers and controller
 	go informersFactory.Start(context.Background().Done())
-	go csInformer.Run(context.Background().Done())
-	if !cache.WaitForCacheSync(context.Background().Done(), secrets.HasSynced, configMaps.HasSynced, csInformer.HasSynced) {
+	go notificationInformer.Run(context.Background().Done())
+	if !cache.WaitForCacheSync(context.Background().Done(), secrets.HasSynced, configMaps.HasSynced, notificationInformer.HasSynced) {
 		klog.Fatalf("Failed to synchronize informers")
 	}
 

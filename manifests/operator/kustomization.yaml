@@ -18,4 +18,3 @@ resources:
 - ../hierarchyconfig-crd.yaml
 - ../policy-controller-psp.yaml
 - ../templates/admission-webhook.yaml
-- ../templates/notification.yaml

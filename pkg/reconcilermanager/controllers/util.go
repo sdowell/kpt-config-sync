@@ -76,6 +76,38 @@ func hydrationEnvs(sourceType string, gitConfig *v1beta1.Git, ociConfig *v1beta1
 	return result
 }
 
+// notificationEnvs returns environment variables for the notification controller.
+func notificationEnvs(kind, rsNamespace, rsName, cmName, secretName string) []corev1.EnvVar {
+	var result []corev1.EnvVar
+	result = append(result,
+		corev1.EnvVar{
+			Name:  reconcilermanager.NotificationApiKind,
+			Value: kind,
+		},
+		corev1.EnvVar{
+			Name:  reconcilermanager.NotificationConfigMapName,
+			Value: cmName,
+		},
+		corev1.EnvVar{
+			Name:  reconcilermanager.NotificationResourceName,
+			Value: rsName,
+		},
+		corev1.EnvVar{
+			Name:  reconcilermanager.NotificationResourceNamespace,
+			Value: rsNamespace,
+		},
+	)
+	if secretName != "" {
+		result = append(result,
+			corev1.EnvVar{
+				Name:  reconcilermanager.NotificationSecretName,
+				Value: secretName,
+			},
+		)
+	}
+	return result
+}
+
 // reconcilerEnvs returns environment variables for namespace reconciler.
 func reconcilerEnvs(clusterName, syncName, reconcilerName string, reconcilerScope declared.Scope, sourceType string, gitConfig *v1beta1.Git, ociConfig *v1beta1.Oci, helmConfig *v1beta1.HelmBase, pollPeriod, statusMode string, reconcileTimeout string, apiServerTimeout string) []corev1.EnvVar {
 	var result []corev1.EnvVar
