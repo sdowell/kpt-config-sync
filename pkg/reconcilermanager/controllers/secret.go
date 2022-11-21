@@ -133,33 +133,6 @@ func upsertCACertSecret(ctx context.Context, log logr.Logger, rs *v1beta1.RepoSy
 	return client.ObjectKey{}, nil
 }
 
-// upsertNotificationSecret creates or updates the notification secret in the
-// config-management-system namespace using an existing secret in the RepoSync
-// namespace.
-func upsertNotificationSecret(ctx context.Context, log logr.Logger, rs *v1beta1.RepoSync, c client.Client, reconcilerRef types.NamespacedName, shouldUpsert bool) (client.ObjectKey, error) {
-	rsRef := client.ObjectKeyFromObject(rs)
-	if shouldUpsert {
-		nsSecretRef, cmsSecretRef := getSecretRefs(rsRef, reconcilerRef, v1beta1.GetSecretName(rs.Spec.NotificationConfig.SecretRef))
-		userSecret, err := getUserSecret(ctx, c, nsSecretRef)
-		if err != nil {
-			return cmsSecretRef, errors.Wrap(err, "user secret required for notification")
-		}
-		op, err := upsertSecret(ctx, c, cmsSecretRef, rsRef, userSecret)
-		if err != nil {
-			return cmsSecretRef, err
-		}
-		if op != controllerutil.OperationResultNone {
-			log.Info("Managed object upsert successful",
-				logFieldObject, cmsSecretRef.String(),
-				logFieldKind, "Secret",
-				logFieldOperation, op)
-		}
-		return cmsSecretRef, nil
-	}
-	// No secret required
-	return client.ObjectKey{}, nil
-}
-
 func getSecretRefs(rsRef, reconcilerRef client.ObjectKey, secretName string) (nsSecretRef, cmsSecretRef client.ObjectKey) {
 	// User managed secret
 	nsSecretRef = client.ObjectKey{

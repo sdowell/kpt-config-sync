@@ -309,8 +309,9 @@ func (r *RepoSyncReconciler) Reconcile(ctx context.Context, req controllerruntim
 		return controllerruntime.Result{}, errors.Wrap(err, "Check notification subscription failed")
 	}
 	var notificationCMName string
+	var notificationSecretName string
 	if notificationEnabled {
-		notificationCMName, err = r.mergeNotificationConfigs(ctx, rs.Namespace, rs.Name, rs.Spec.NotificationConfig)
+		notificationCMName, err = r.mergeNotificationConfigs(ctx, rs.Kind, rs.Namespace, rs.Name, rs.Spec.NotificationConfig)
 		if err != nil {
 			log.Error(err, "Merge notification configs failed")
 			reposync.SetStalled(rs, "Notification", err)
@@ -328,29 +329,33 @@ func (r *RepoSyncReconciler) Reconcile(ctx context.Context, req controllerruntim
 		}
 	}
 
-	// Create secret in config-management-system namespace using the
-	// existing secret in the reposync.namespace.
-	sRef, err := upsertNotificationSecret(ctx, log, rs, r.client, reconcilerRef, notificationEnabled)
-	if err != nil {
-		log.Error(err, "Managed object upsert failed",
-			logFieldObject, sRef.String(),
-			logFieldKind, "Secret",
-			"type", "notification")
-		reposync.SetStalled(rs, "Secret", err)
-		// Upsert errors should always trigger retry (return error),
-		// even if status update is successful.
-		_, updateErr := r.updateStatus(ctx, currentRS, rs)
-		if updateErr != nil {
-			log.Error(updateErr, "Object status update failed",
-				logFieldObject, rsRef.String(),
-				logFieldKind, r.syncKind)
+	if rs.Spec.NotificationConfig != nil && rs.Spec.NotificationConfig.SecretRef != nil && rs.Spec.NotificationConfig.SecretRef.Name != "" {
+		notificationSecretName = rs.Spec.NotificationConfig.SecretRef.Name
+		_, err = validateSecretExist(ctx,
+			notificationSecretName,
+			rs.Namespace,
+			r.client)
+		if err != nil {
+			log.Error(err, "Secret validation failed",
+				logFieldObject, notificationSecretName,
+				logFieldKind, "Secret",
+				"type", "notification")
+			reposync.SetStalled(rs, "Secret", err)
+			// Upsert errors should always trigger retry (return error),
+			// even if status update is successful.
+			_, updateErr := r.updateStatus(ctx, currentRS, rs)
+			if updateErr != nil {
+				log.Error(updateErr, "Object status update failed",
+					logFieldObject, rsRef.String(),
+					logFieldKind, r.syncKind)
+			}
+			// Use the upsert error for metric tagging.
+			metrics.RecordReconcileDuration(ctx, metrics.StatusTagKey(err), start)
+			return controllerruntime.Result{}, errors.Wrap(err, "Secret reconcile failed")
 		}
-		// Use the upsert error for metric tagging.
-		metrics.RecordReconcileDuration(ctx, metrics.StatusTagKey(err), start)
-		return controllerruntime.Result{}, errors.Wrap(err, "Secret reconcile failed")
 	}
 
-	containerEnvs := r.populateContainerEnvs(ctx, rs, notificationEnabled, reconcilerRef.Name, notificationCMName, sRef.Name)
+	containerEnvs := r.populateContainerEnvs(ctx, rs, notificationEnabled, reconcilerRef.Name, notificationCMName, notificationSecretName)
 	mut := r.mutationsFor(ctx, rs, notificationEnabled, containerEnvs)
 
 	// Upsert Namespace reconciler deployment.
@@ -999,54 +1004,6 @@ func (r *RepoSyncReconciler) mutationsFor(ctx context.Context, rs *v1beta1.RepoS
 		templateSpec.Containers = updatedContainers
 		return nil
 	}
-}
-
-// mergeNotificationConfigs combines the user-provided custom configs with the default configs.
-func (r *RepoSyncReconciler) mergeNotificationConfigs(ctx context.Context, rsNamespace, rsName string, config *v1beta1.NotificationConfig) (string, error) {
-	if config == nil || config.ConfigMapRef == nil || config.ConfigMapRef.Name == "" {
-		return reconcilermanager.DefaultNotificationCMName, nil
-	}
-	cm := &corev1.ConfigMap{}
-	cmObjectKey := types.NamespacedName{
-		Namespace: rsNamespace,
-		Name:      config.ConfigMapRef.Name,
-	}
-	if err := r.client.Get(ctx, cmObjectKey, cm); err != nil {
-		return "", fmt.Errorf("failed to get the custom notification ConfigMap %s in the %s namespace: %w", cmObjectKey.Name, cmObjectKey.Namespace, err)
-	}
-
-	defaultCM := &corev1.ConfigMap{}
-	defaultCMObjectKey := types.NamespacedName{
-		Namespace: configsync.ControllerNamespace,
-		Name:      reconcilermanager.DefaultNotificationCMName,
-	}
-	if err := r.client.Get(ctx, defaultCMObjectKey, defaultCM); err != nil {
-		return "", fmt.Errorf("failed to get the default notification ConfigMap %s in the %s namespace: %w", defaultCMObjectKey.Name, defaultCMObjectKey.Namespace, err)
-	}
-
-	for key, value := range defaultCM.Data {
-		if _, found := cm.Data[key]; !found {
-			cm.Data[key] = value
-		}
-	}
-
-	cmsCM := &corev1.ConfigMap{}
-	cmsCM.Namespace = configsync.ControllerNamespace
-	cmsCM.Name = ReconcilerResourceName(core.NsReconcilerName(rsNamespace, rsName), cm.Name)
-	op, err := controllerruntime.CreateOrUpdate(ctx, r.client, cmsCM, func() error {
-		cmsCM.Data = cm.Data
-		return nil
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to upsert the merged notification ConfigMap %s in the %s namespace: %w", cmsCM.Name, cmsCM.Namespace, err)
-	}
-	if op != controllerutil.OperationResultNone {
-		r.log.Info("Merge and upsert notification configs successful",
-			logFieldObject, client.ObjectKeyFromObject(cmsCM).String(),
-			logFieldKind, "ConfigMap",
-			logFieldOperation, op)
-	}
-	return cmsCM.Name, nil
 }
 
 // notificationEnabled returns whether the notification is enabled for the RepoSync.

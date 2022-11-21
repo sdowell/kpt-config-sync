@@ -264,7 +264,7 @@ func (r *RootSyncReconciler) Reconcile(ctx context.Context, req controllerruntim
 	var notificationCMName string
 	var notificationSecretName string
 	if notificationEnabled {
-		notificationCMName, err = r.mergeNotificationConfigs(ctx, rs.Namespace, rs.Spec.NotificationConfig)
+		notificationCMName, err = r.mergeNotificationConfigs(ctx, rs.Kind, rs.Namespace, rs.Name, rs.Spec.NotificationConfig)
 		if err != nil {
 			log.Error(err, "Merge notification configs failed")
 			rootsync.SetStalled(rs, "Notification", err)
@@ -825,44 +825,6 @@ func (r *RootSyncReconciler) mutationsFor(ctx context.Context, rs *v1beta1.RootS
 		templateSpec.Containers = updatedContainers
 		return nil
 	}
-}
-
-// mergeNotificationConfigs combines the user-provided custom configs with the default configs.
-func (r *RootSyncReconciler) mergeNotificationConfigs(ctx context.Context, rsNamespace string, config *v1beta1.NotificationConfig) (string, error) {
-	if config == nil || config.ConfigMapRef == nil || config.ConfigMapRef.Name == "" || config.ConfigMapRef.Name == reconcilermanager.DefaultNotificationCMName {
-		return reconcilermanager.DefaultNotificationCMName, nil
-	}
-	cm := &corev1.ConfigMap{}
-	cmObjectKey := types.NamespacedName{
-		Namespace: rsNamespace,
-		Name:      config.ConfigMapRef.Name,
-	}
-	if err := r.client.Get(ctx, cmObjectKey, cm); err != nil {
-		return "", fmt.Errorf("failed to get the custom notification ConfigMap %s in the %s namespace: %w", cmObjectKey.Name, cmObjectKey.Namespace, err)
-	}
-
-	defaultCM := &corev1.ConfigMap{}
-	defaultCMObjectKey := types.NamespacedName{
-		Namespace: configsync.ControllerNamespace,
-		Name:      reconcilermanager.DefaultNotificationCMName,
-	}
-	if err := r.client.Get(ctx, defaultCMObjectKey, defaultCM); err != nil {
-		return "", fmt.Errorf("failed to get the default notification ConfigMap %s in the %s namespace: %w", defaultCMObjectKey.Name, defaultCMObjectKey.Namespace, err)
-	}
-
-	for key, value := range defaultCM.Data {
-		if _, found := cm.Data[key]; !found {
-			cm.Data[key] = value
-		}
-	}
-
-	if err := r.client.Update(ctx, cm); err != nil {
-		return "", fmt.Errorf("failed to merge the ConfigMap %s in the %s namespace: %w", cm.Name, cm.Namespace, err)
-	}
-	r.log.Info("Merge notification configs successful",
-		logFieldKind, "ConfigMap",
-		logFieldObject, cm.Name)
-	return cm.Name, nil
 }
 
 // notificationEnabled returns whether the notification is enabled for the RootSync.

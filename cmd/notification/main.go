@@ -19,7 +19,6 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
 	csclientv1beta1 "kpt.dev/configsync/clientgen/apis/typed/configsync/v1beta1"
-	"kpt.dev/configsync/pkg/api/configsync"
 	"kpt.dev/configsync/pkg/api/configsync/v1beta1"
 	"kpt.dev/configsync/pkg/core"
 	"kpt.dev/configsync/pkg/kinds"
@@ -84,7 +83,7 @@ func main() {
 	informersFactory := informers.NewSharedInformerFactoryWithOptions(
 		kubernetes.NewForConfigOrDie(restConfig),
 		*resyncCheckPeriod,
-		informers.WithNamespace(configsync.ControllerNamespace))
+		informers.WithNamespace(*resourceNamespace))
 	secrets := informersFactory.Core().V1().Secrets().Informer()
 	configMaps := informersFactory.Core().V1().ConfigMaps().Informer()
 
@@ -97,7 +96,7 @@ func main() {
 				return map[string]interface{}{ObjectKey: obj}
 			}, nil
 		},
-	}, configsync.ControllerNamespace, secrets, configMaps)
+	}, *resourceNamespace, secrets, configMaps)
 
 	// Create notifications controller that handles Kubernetes resources processing
 	apiResource := fmt.Sprintf("%ss", strings.ToLower(*apiKind))
