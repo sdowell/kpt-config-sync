@@ -261,14 +261,20 @@ func (r *RootSyncReconciler) Reconcile(ctx context.Context, req controllerruntim
 		metrics.RecordReconcileDuration(ctx, metrics.StatusTagKey(err), start)
 		return controllerruntime.Result{}, errors.Wrap(err, "Check notification subscription failed")
 	}
-	var notificationCMName string
-	var notificationSecretName string
-	if notificationEnabled {
-		notificationCMName, err = r.mergeNotificationConfigs(ctx, rs.Kind, rs.Namespace, rs.Name, rs.Spec.NotificationConfig)
+	if notificationEnabled && rs.Spec.NotificationConfig != nil &&
+		rs.Spec.NotificationConfig.SecretRef != nil &&
+		rs.Spec.NotificationConfig.SecretRef.Name != "" {
+		_, err = validateSecretExist(ctx,
+			rs.Spec.NotificationConfig.SecretRef.Name,
+			rs.Namespace,
+			r.client)
 		if err != nil {
-			log.Error(err, "Merge notification configs failed")
-			rootsync.SetStalled(rs, "Notification", err)
-			// merge errors should always trigger retry (return error),
+			log.Error(err, "Secret validation failed",
+				logFieldObject, rs.Spec.NotificationConfig.SecretRef.Name,
+				logFieldKind, "Secret",
+				"type", "notification")
+			rootsync.SetStalled(rs, "Secret", err)
+			// Upsert errors should always trigger retry (return error),
 			// even if status update is successful.
 			_, updateErr := r.updateStatus(ctx, currentRS, rs)
 			if updateErr != nil {
@@ -278,37 +284,11 @@ func (r *RootSyncReconciler) Reconcile(ctx context.Context, req controllerruntim
 			}
 			// Use the upsert error for metric tagging.
 			metrics.RecordReconcileDuration(ctx, metrics.StatusTagKey(err), start)
-			return controllerruntime.Result{}, errors.Wrap(err, "Merge notification configs failed")
-		}
-
-		if rs.Spec.NotificationConfig != nil && rs.Spec.NotificationConfig.SecretRef != nil && rs.Spec.NotificationConfig.SecretRef.Name != "" {
-			notificationSecretName = rs.Spec.NotificationConfig.SecretRef.Name
-			_, err = validateSecretExist(ctx,
-				notificationSecretName,
-				rs.Namespace,
-				r.client)
-			if err != nil {
-				log.Error(err, "Secret validation failed",
-					logFieldObject, notificationSecretName,
-					logFieldKind, "Secret",
-					"type", "notification")
-				rootsync.SetStalled(rs, "Secret", err)
-				// Upsert errors should always trigger retry (return error),
-				// even if status update is successful.
-				_, updateErr := r.updateStatus(ctx, currentRS, rs)
-				if updateErr != nil {
-					log.Error(updateErr, "Object status update failed",
-						logFieldObject, rsRef.String(),
-						logFieldKind, r.syncKind)
-				}
-				// Use the upsert error for metric tagging.
-				metrics.RecordReconcileDuration(ctx, metrics.StatusTagKey(err), start)
-				return controllerruntime.Result{}, errors.Wrap(err, "Secret validation failed")
-			}
+			return controllerruntime.Result{}, errors.Wrap(err, "Secret validation failed")
 		}
 	}
 
-	containerEnvs := r.populateContainerEnvs(ctx, rs, notificationEnabled, reconcilerRef.Name, notificationCMName, notificationSecretName)
+	containerEnvs := r.populateContainerEnvs(ctx, rs, notificationEnabled, reconcilerRef.Name, rs.Spec.NotificationConfig.ConfigMapRef.Name, rs.Spec.NotificationConfig.SecretRef.Name)
 	mut := r.mutationsFor(ctx, rs, notificationEnabled, containerEnvs)
 
 	// Upsert Root reconciler deployment.

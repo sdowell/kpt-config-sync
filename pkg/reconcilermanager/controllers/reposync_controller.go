@@ -308,36 +308,17 @@ func (r *RepoSyncReconciler) Reconcile(ctx context.Context, req controllerruntim
 		metrics.RecordReconcileDuration(ctx, metrics.StatusTagKey(err), start)
 		return controllerruntime.Result{}, errors.Wrap(err, "Check notification subscription failed")
 	}
-	var notificationCMName string
-	var notificationSecretName string
-	if notificationEnabled {
-		notificationCMName, err = r.mergeNotificationConfigs(ctx, rs.Kind, rs.Namespace, rs.Name, rs.Spec.NotificationConfig)
-		if err != nil {
-			log.Error(err, "Merge notification configs failed")
-			reposync.SetStalled(rs, "Notification", err)
-			// merge errors should always trigger retry (return error),
-			// even if status update is successful.
-			_, updateErr := r.updateStatus(ctx, currentRS, rs)
-			if updateErr != nil {
-				log.Error(updateErr, "Object status update failed",
-					logFieldObject, rsRef.String(),
-					logFieldKind, r.syncKind)
-			}
-			// Use the upsert error for metric tagging.
-			metrics.RecordReconcileDuration(ctx, metrics.StatusTagKey(err), start)
-			return controllerruntime.Result{}, errors.Wrap(err, "Merge notification configs failed")
-		}
-	}
 
-	if rs.Spec.NotificationConfig != nil && rs.Spec.NotificationConfig.SecretRef != nil && rs.Spec.NotificationConfig.SecretRef.Name != "" {
-		notificationSecretName = rs.Spec.NotificationConfig.SecretRef.Name
+	if notificationEnabled && rs.Spec.NotificationConfig != nil &&
+		rs.Spec.NotificationConfig.SecretRef != nil &&
+		rs.Spec.NotificationConfig.SecretRef.Name != "" {
 		_, err = validateSecretExist(ctx,
-			notificationSecretName,
+			rs.Spec.NotificationConfig.SecretRef.Name,
 			rs.Namespace,
 			r.client)
 		if err != nil {
 			log.Error(err, "Secret validation failed",
-				logFieldObject, notificationSecretName,
+				logFieldObject, rs.Spec.NotificationConfig.SecretRef.Name,
 				logFieldKind, "Secret",
 				"type", "notification")
 			reposync.SetStalled(rs, "Secret", err)
@@ -355,7 +336,7 @@ func (r *RepoSyncReconciler) Reconcile(ctx context.Context, req controllerruntim
 		}
 	}
 
-	containerEnvs := r.populateContainerEnvs(ctx, rs, notificationEnabled, reconcilerRef.Name, notificationCMName, notificationSecretName)
+	containerEnvs := r.populateContainerEnvs(ctx, rs, notificationEnabled, reconcilerRef.Name, rs.Spec.NotificationConfig.ConfigMapRef.Name, rs.Spec.NotificationConfig.SecretRef.Name)
 	mut := r.mutationsFor(ctx, rs, notificationEnabled, containerEnvs)
 
 	// Upsert Namespace reconciler deployment.
@@ -1022,7 +1003,7 @@ func (r *RepoSyncReconciler) notificationEnabled(ctx context.Context, rs *v1beta
 		}
 		if err := r.client.Get(ctx, cmObjectKey, cm); err != nil {
 			if apierrors.IsNotFound(err) {
-				return false, nil
+				return false, fmt.Errorf("notification ConfigMap %s not found in the %s namespace", cmObjectKey.Name, cmObjectKey.Namespace)
 			}
 			return false, err
 		}
