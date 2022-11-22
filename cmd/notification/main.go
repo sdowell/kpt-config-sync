@@ -12,6 +12,7 @@ import (
 	"github.com/argoproj/notifications-engine/pkg/controller"
 	"github.com/argoproj/notifications-engine/pkg/services"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
@@ -71,9 +72,40 @@ func pollingPeriod(envName string, defaultValue time.Duration) time.Duration {
 	return defaultValue
 }
 
+type statusHook struct {
+	resourceName string
+}
+
+func (sh *statusHook) Fire(entry *logrus.Entry) error {
+	resource, ok := entry.Data["resource"]
+	if !ok {
+		return nil // this is a log entry for something else
+	}
+	if resource != sh.resourceName {
+		return nil
+	}
+	message, err := entry.String()
+	if err != nil {
+		klog.Infof("Failed to parse log entry:\n%v", err)
+		return nil
+	}
+	// This is a log entry for our resource!
+	klog.Errorf("+++ Found an error in the notification controller:\n%s", message)
+	return nil
+}
+
+func (sh *statusHook) Levels() []logrus.Level {
+	return []logrus.Level{
+		logrus.ErrorLevel,
+	}
+}
+
 func main() {
 	log.Setup()
 	ctrl.SetLogger(klogr.New())
+	logrus.AddHook(&statusHook{
+		resourceName: fmt.Sprintf("%s/%s", *resourceNamespace, *resourceName),
+	})
 
 	// Get Kubernetes REST Config and current Namespace so we can talk to Kubernetes
 	restConfig := ctrl.GetConfigOrDie()
