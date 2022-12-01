@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 type TelegramOptions struct {
@@ -31,12 +31,20 @@ func (s telegramService) Send(notification Notification, dest Destination) error
 			return err
 		}
 
-		_, err = bot.Send(tgbotapi.NewMessage(chatID, notification.Message))
+		// Init message with ParseMode is 'Markdown'
+		msg := tgbotapi.NewMessage(chatID, notification.Message)
+		msg.ParseMode = "Markdown"
+
+		_, err = bot.Send(msg)
 		if err != nil {
 			return err
 		}
 	} else {
-		_, err := bot.Send(tgbotapi.NewMessageToChannel("@"+dest.Recipient, notification.Message))
+		// Init message with ParseMode is 'Markdown'
+		msg := tgbotapi.NewMessageToChannel("@"+dest.Recipient, notification.Message)
+		msg.ParseMode = "Markdown"
+
+		_, err := bot.Send(msg)
 		if err != nil {
 			return err
 		}

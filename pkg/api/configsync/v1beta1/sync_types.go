@@ -49,6 +49,8 @@ type Status struct {
 	// source of truth to the cluster.
 	// +optional
 	Sync SyncStatus `json:"sync,omitempty"`
+
+	Notifications NotificationStatus `json:"notifications,omitempty"`
 }
 
 // SourceStatus describes the source status of a source-of-truth.
@@ -155,6 +157,12 @@ type SyncStatus struct {
 	// errorSummary summarizes the errors encountered during the process of syncing the resources.
 	// +optional
 	ErrorSummary *ErrorSummary `json:"errorSummary,omitempty"`
+}
+
+type NotificationStatus struct {
+	Commit string `json:"commit,omitempty"`
+
+	Message string `json:"message,omitempty"`
 }
 
 // GitStatus describes the status of a Git source of truth.

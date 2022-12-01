@@ -53,6 +53,12 @@ func WithSkipProcessing(f func(obj v1.Object) (bool, string)) Opts {
 	}
 }
 
+func WithSendCallback(f func(v1.Object, string, services.Destination, error)) Opts {
+	return func(ctrl *notificationController) {
+		ctrl.sendCallback = f
+	}
+}
+
 func NewController(
 	client dynamic.NamespaceableResourceInterface,
 	informer cache.SharedIndexInformer,
@@ -106,6 +112,7 @@ type notificationController struct {
 	skipProcessing    func(obj v1.Object) (bool, string)
 	alterDestinations func(obj v1.Object, destinations services.Destinations, cfg api.Config) services.Destinations
 	toUnstructured    func(obj v1.Object) (*unstructured.Unstructured, error)
+	sendCallback      func(v1.Object, string, services.Destination, error)
 }
 
 func (c *notificationController) Run(threadiness int, stopCh <-chan struct{}) {
@@ -162,7 +169,7 @@ func (c *notificationController) processResource(resource v1.Object, logEntry *l
 					logEntry.Infof("Notification about condition '%s.%s' already sent to '%v'", trigger, cr.Key, to)
 				} else {
 					logEntry.Infof("Sending notification about condition '%s.%s' to '%v'", trigger, cr.Key, to)
-					if err := api.Send(un.Object, cr.Templates, to); err != nil {
+					if err = api.Send(un.Object, cr.Templates, to); err != nil {
 						logEntry.Errorf("Failed to notify recipient %s defined in resource %s/%s: %v",
 							to, resource.GetNamespace(), resource.GetName(), err)
 						notificationsState.SetAlreadyNotified(trigger, cr, to, false)
@@ -170,6 +177,9 @@ func (c *notificationController) processResource(resource v1.Object, logEntry *l
 					} else {
 						logEntry.Debugf("Notification %s was sent", to.Recipient)
 						c.metricsRegistry.IncDeliveriesCounter(trigger, to.Service, true)
+					}
+					if c.sendCallback != nil {
+						c.sendCallback(resource, trigger, to, err)
 					}
 				}
 			}

@@ -65,7 +65,7 @@ func pollingPeriod(envName string, defaultValue time.Duration) time.Duration {
 		pollingFreq, err := time.ParseDuration(val)
 		if err != nil {
 			panic(errors.Wrapf(err, "failed to parse environment variable %q,"+
-				"got value: %v, want err: nil", envName, pollingFreq))
+					"got value: %v, want err: nil", envName, pollingFreq))
 		}
 		return pollingFreq
 	}
@@ -90,13 +90,22 @@ func (sh *statusHook) Fire(entry *logrus.Entry) error {
 		return nil
 	}
 	// This is a log entry for our resource!
-	klog.Errorf("+++ Found an error in the notification controller:\n%s", message)
+	// We may choose to parse this log message in order to detect error conditions,
+	// although this would probably be fragile.
+	if entry.Level == logrus.ErrorLevel && strings.HasPrefix(message, "Failed to notify recipient ") {
+		klog.Errorf("+++ Found a notification failure in the notification controller:\n%s", message)
+	} else if entry.Level == logrus.DebugLevel && strings.HasPrefix(message, "Notification ") && strings.HasSuffix(message, " was sent") {
+		klog.Errorf("+++ Found a notification success in the notification controller:\n%s", message)
+	} else {
+		klog.Errorf("+++ Found an unidentified error in the notification controller:\n%s", message)
+	}
 	return nil
 }
 
 func (sh *statusHook) Levels() []logrus.Level {
 	return []logrus.Level{
 		logrus.ErrorLevel,
+		logrus.DebugLevel,
 	}
 }
 
@@ -153,40 +162,49 @@ func main() {
 		cache.NewListWatchFromClient(csClient.RESTClient(), apiResource, *resourceNamespace, fieldsSelector),
 		exampleObject, *resyncCheckPeriod, cache.Indexers{})
 
-	notificationController := controller.NewController(notificationClient, notificationInformer, notificationsFactory, controller.WithToUnstructured(func(obj metav1.Object) (*unstructured.Unstructured, error) {
-		switch obj.(type) {
-		case *unstructured.Unstructured:
-			switch *apiKind {
-			case kinds.RootSyncV1Beta1().Kind:
-				rs := &v1beta1.RootSync{}
-				unstructuredContent := obj.(*unstructured.Unstructured).UnstructuredContent()
-				if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredContent, rs); err != nil {
-					return nil, fmt.Errorf("failed to convert the unstructured object into RootSync: %v", err)
+	notificationController := controller.NewController(
+		notificationClient,
+		notificationInformer,
+		notificationsFactory,
+		controller.WithToUnstructured(func(obj metav1.Object) (*unstructured.Unstructured, error) {
+			switch obj.(type) {
+			case *unstructured.Unstructured:
+				switch *apiKind {
+				case kinds.RootSyncV1Beta1().Kind:
+					rs := &v1beta1.RootSync{}
+					unstructuredContent := obj.(*unstructured.Unstructured).UnstructuredContent()
+					if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredContent, rs); err != nil {
+						return nil, fmt.Errorf("failed to convert the unstructured object into RootSync: %v", err)
+					}
+					return kinds.ToUnstructured(rs, core.Scheme)
+				case kinds.RepoSyncV1Beta1().Kind:
+					rs := &v1beta1.RepoSync{}
+					unstructuredContent := obj.(*unstructured.Unstructured).UnstructuredContent()
+					if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredContent, rs); err != nil {
+						return nil, fmt.Errorf("failed to convert the unstructured object into RepoSync: %v", err)
+					}
+					return kinds.ToUnstructured(rs, core.Scheme)
+				}
+			case *v1beta1.RootSync:
+				rs, ok := obj.(*v1beta1.RootSync)
+				if !ok {
+					return nil, fmt.Errorf("object must be v1beta1.RootSync but is %T", rs)
 				}
 				return kinds.ToUnstructured(rs, core.Scheme)
-			case kinds.RepoSyncV1Beta1().Kind:
-				rs := &v1beta1.RepoSync{}
-				unstructuredContent := obj.(*unstructured.Unstructured).UnstructuredContent()
-				if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredContent, rs); err != nil {
-					return nil, fmt.Errorf("failed to convert the unstructured object into RepoSync: %v", err)
+			case *v1beta1.RepoSync:
+				rs, ok := obj.(*v1beta1.RepoSync)
+				if !ok {
+					return nil, fmt.Errorf("object must be v1beta1.RepoSync but is %T", rs)
 				}
 				return kinds.ToUnstructured(rs, core.Scheme)
 			}
-		case *v1beta1.RootSync:
-			rs, ok := obj.(*v1beta1.RootSync)
-			if !ok {
-				return nil, fmt.Errorf("object must be v1beta1.RootSync but is %T", rs)
-			}
-			return kinds.ToUnstructured(rs, core.Scheme)
-		case *v1beta1.RepoSync:
-			rs, ok := obj.(*v1beta1.RepoSync)
-			if !ok {
-				return nil, fmt.Errorf("object must be v1beta1.RepoSync but is %T", rs)
-			}
-			return kinds.ToUnstructured(rs, core.Scheme)
-		}
-		return nil, fmt.Errorf("unknown object type %T", obj)
-	}))
+			return nil, fmt.Errorf("unknown object type %T", obj)
+		}),
+		controller.WithSendCallback(func(resource metav1.Object, trigger string, dest services.Destination, err error) {
+			klog.Infof("Send callback with %s/%s. Trigger: %s. Service: %s. Recipient: %s. Err: %v.",
+				resource.GetNamespace(), resource.GetName(), trigger, dest.Service, dest.Recipient, err)
+		}),
+	)
 
 	// Start informers and controller
 	go informersFactory.Start(context.Background().Done())
