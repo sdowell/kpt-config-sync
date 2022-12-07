@@ -29,6 +29,7 @@ import (
 	"kpt.dev/configsync/pkg/declared"
 	"kpt.dev/configsync/pkg/importer/filesystem"
 	"kpt.dev/configsync/pkg/reconcilermanager"
+	"kpt.dev/configsync/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -81,26 +82,26 @@ func notificationEnvs(kind, rsNamespace, rsName, cmName, secretName string) []co
 	var result []corev1.EnvVar
 	result = append(result,
 		corev1.EnvVar{
-			Name:  reconcilermanager.NotificationApiKind,
+			Name:  util.NotificationApiKind,
 			Value: kind,
 		},
 		corev1.EnvVar{
-			Name:  reconcilermanager.NotificationConfigMapName,
+			Name:  util.NotificationConfigMapName,
 			Value: cmName,
 		},
 		corev1.EnvVar{
-			Name:  reconcilermanager.NotificationResourceName,
+			Name:  util.NotificationResourceName,
 			Value: rsName,
 		},
 		corev1.EnvVar{
-			Name:  reconcilermanager.NotificationResourceNamespace,
+			Name:  util.NotificationResourceNamespace,
 			Value: rsNamespace,
 		},
 	)
 	if secretName != "" {
 		result = append(result,
 			corev1.EnvVar{
-				Name:  reconcilermanager.NotificationSecretName,
+				Name:  util.NotificationSecretName,
 				Value: secretName,
 			},
 		)

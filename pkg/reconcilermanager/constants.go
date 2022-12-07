@@ -14,8 +14,6 @@
 
 package reconcilermanager
 
-import "github.com/argoproj/notifications-engine/pkg/subscriptions"
-
 const (
 	// ManagerName is the name of the controller which creates reconcilers.
 	ManagerName = "reconciler-manager"
@@ -149,21 +147,4 @@ const (
 
 	// HelmSyncWait is the OS env variable key for the Helm sync wait period in seconds.
 	HelmSyncWait = "HELM_SYNC_WAIT"
-)
-
-const (
-	NotificationApiGroup          = "NOTIFICATION_API_GROUP"
-	NotificationApiVersion        = "NOTIFICATION_API_VERSION"
-	NotificationApiKind           = "NOTIFICATION_API_KIND"
-	NotificationResourceName      = "NOTIFICATION_RESOURCE_NAME"
-	NotificationResourceNamespace = "NOTIFICATION_RESOURCE_NAMESPACE"
-	NotificationResyncPeriod      = "NOTIFICATION_RESYNC_PERIOD"
-	NotificationConfigMapName     = "NOTIFICATION_CONFIGMAP_NAME"
-	NotificationSecretName        = "NOTIFICATION_SECRET_NAME"
-
-	// SubscribeAnnotationPrefix is the annotation prefix of the notification subscription.
-	SubscribeAnnotationPrefix = subscriptions.AnnotationPrefix + "/subscribe."
-
-	// DefaultNotificationCMName is the name of the ConfigMap for the default notification configs.
-	DefaultNotificationCMName = "notification-cm"
 )

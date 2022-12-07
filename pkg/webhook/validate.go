@@ -25,11 +25,14 @@ import (
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
+	"kpt.dev/configsync/pkg/api/configsync/v1beta1"
 	"kpt.dev/configsync/pkg/core"
 	"kpt.dev/configsync/pkg/declared"
 	"kpt.dev/configsync/pkg/diff"
+	"kpt.dev/configsync/pkg/kinds"
 	csmetadata "kpt.dev/configsync/pkg/metadata"
 	"kpt.dev/configsync/pkg/syncer/differ"
+	"kpt.dev/configsync/pkg/util"
 	"kpt.dev/configsync/pkg/webhook/configuration"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -39,7 +42,7 @@ import (
 
 // AddValidator adds the admission webhook validator to the passed manager.
 func AddValidator(mgr manager.Manager) error {
-	handler, err := handler(mgr.GetConfig())
+	handler, err := handler(mgr.GetConfig(), mgr.GetClient())
 	if err != nil {
 		return err
 	}
@@ -53,12 +56,13 @@ func AddValidator(mgr manager.Manager) error {
 // requests and admits or denies them.
 type Validator struct {
 	differ *ObjectDiffer
+	client client.Client
 }
 
 var _ admission.Handler = &Validator{}
 
 // Handler returns a Validator which satisfies the admission.Handler interface.
-func handler(cfg *rest.Config) (*Validator, error) {
+func handler(cfg *rest.Config, client client.Client) (*Validator, error) {
 	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -67,7 +71,7 @@ func handler(cfg *rest.Config) (*Validator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Validator{&ObjectDiffer{vc}}, nil
+	return &Validator{differ: &ObjectDiffer{vc}, client: client}, nil
 }
 
 // Handle implements admission.Handler
@@ -95,6 +99,11 @@ func (v *Validator) Handle(_ context.Context, req admission.Request) admission.R
 		manager := objectManager(oldObj, newObj)
 		id := objectID(oldObj, newObj)
 		// TODO: validate managed=enabled?
+
+		if v.allowNotificationAnnotation(oldObj, newObj, username) {
+			return allow()
+		}
+
 		err = diff.ValidateManager(username, manager, id, req.Operation)
 		if err != nil {
 			klog.Error(err.Error())
@@ -120,6 +129,57 @@ func (v *Validator) Handle(_ context.Context, req admission.Request) admission.R
 		klog.Errorf("Unsupported operation: %v from %s", req.Operation, username)
 		return allow()
 	}
+}
+
+func (v *Validator) allowNotificationAnnotation(oldObj, newObj client.Object, username string) bool {
+	var enabled bool
+	var err error
+	var reconciler string
+	switch newObj.GetObjectKind().GroupVersionKind().Kind {
+	case kinds.RootSyncV1Beta1().Kind:
+		rs, ok := newObj.(*v1beta1.RootSync)
+		if !ok {
+			klog.Errorf("failed to convert the object into RootSync, object type is %T", newObj)
+			return false
+		}
+		enabled, err = util.NotificationEnabled(context.Background(), v.client, newObj.GetNamespace(), newObj.GetAnnotations(), rs.Spec.NotificationConfig)
+		if err != nil {
+			klog.Errorf("unable to determine whether notification is enabled for %s %s/%s: %v", rs.Kind, rs.Namespace, rs.Name, err)
+			return false
+		}
+		reconciler = core.RootReconcilerName(newObj.GetName())
+	case kinds.RepoSyncV1Beta1().Kind:
+		rs, ok := newObj.(*v1beta1.RepoSync)
+		if !ok {
+			klog.Errorf("failed to convert the object into RepoSync, object type is %T", newObj)
+			return false
+		}
+		enabled, err = util.NotificationEnabled(context.Background(), v.client, newObj.GetNamespace(), newObj.GetAnnotations(), rs.Spec.NotificationConfig)
+		if err != nil {
+			klog.Errorf("unable to determine whether notification is enabled for %s %s/%s: %v", rs.Kind, rs.Namespace, rs.Name, err)
+			return false
+		}
+		reconciler = core.NsReconcilerName(rs.GetNamespace(), rs.GetName())
+	default:
+		return false
+	}
+
+	if !enabled {
+		return false
+	}
+
+	if reconciler != username {
+		klog.Errorf("username %q doesn't match the reconciler name %q", username, reconciler)
+		return false
+	}
+
+	// Build a diff set between old and new objects.
+	diffSet, err := v.differ.FieldDiff(oldObj, newObj)
+	if err != nil {
+		klog.Errorf("failed to generate field diff set for object %q: %v", core.GKNN(oldObj), err)
+		return false
+	}
+	return OnlyNotifiedAnnotation(diffSet)
 }
 
 func (v *Validator) handleCreate(newObj client.Object, username string) admission.Response {

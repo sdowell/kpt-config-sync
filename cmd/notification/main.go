@@ -22,7 +22,6 @@ import (
 	"kpt.dev/configsync/pkg/api/configsync/v1beta1"
 	"kpt.dev/configsync/pkg/core"
 	"kpt.dev/configsync/pkg/kinds"
-	"kpt.dev/configsync/pkg/reconcilermanager"
 	"kpt.dev/configsync/pkg/util"
 	"kpt.dev/configsync/pkg/util/log"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -39,21 +38,21 @@ import (
 const ObjectKey = "sync"
 
 var (
-	apiGroup = flag.String("api-group", util.EnvString(reconcilermanager.NotificationApiGroup, v1beta1.SchemeGroupVersion.Group),
+	apiGroup = flag.String("api-group", util.EnvString(util.NotificationApiGroup, v1beta1.SchemeGroupVersion.Group),
 		"Group of the Resource for notifications")
-	apiVersion = flag.String("api-version", util.EnvString(reconcilermanager.NotificationApiVersion, v1beta1.SchemeGroupVersion.Version),
+	apiVersion = flag.String("api-version", util.EnvString(util.NotificationApiVersion, v1beta1.SchemeGroupVersion.Version),
 		"Version of the Resource for notifications")
-	apiKind = flag.String("api-kind", os.Getenv(reconcilermanager.NotificationApiKind),
+	apiKind = flag.String("api-kind", os.Getenv(util.NotificationApiKind),
 		"Resource information of the Resource for notifications")
-	resourceName = flag.String("resource-name", os.Getenv(reconcilermanager.NotificationResourceName),
+	resourceName = flag.String("resource-name", os.Getenv(util.NotificationResourceName),
 		"Name of the Resource to be notified")
-	resourceNamespace = flag.String("resource-namespace", os.Getenv(reconcilermanager.NotificationResourceNamespace),
+	resourceNamespace = flag.String("resource-namespace", os.Getenv(util.NotificationResourceNamespace),
 		"Namespace of the Resource to be notified")
-	resyncCheckPeriod = flag.Duration("resync-period", pollingPeriod(reconcilermanager.NotificationResyncPeriod, time.Minute),
+	resyncCheckPeriod = flag.Duration("resync-period", pollingPeriod(util.NotificationResyncPeriod, time.Minute),
 		"Period of time between checking if the apiResource listener needs a resync")
-	cmName = flag.String("cm-name", os.Getenv(reconcilermanager.NotificationConfigMapName),
+	cmName = flag.String("cm-name", os.Getenv(util.NotificationConfigMapName),
 		"Name of the ConfigMap for the notification configs")
-	secretName = flag.String("secret-name", os.Getenv(reconcilermanager.NotificationSecretName),
+	secretName = flag.String("secret-name", os.Getenv(util.NotificationSecretName),
 		"Name of the Secret for the notification configs")
 )
 

@@ -21,6 +21,7 @@ import (
 	"kpt.dev/configsync/pkg/core"
 	"kpt.dev/configsync/pkg/declared"
 	csmetadata "kpt.dev/configsync/pkg/metadata"
+	"kpt.dev/configsync/pkg/util"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 )
@@ -89,6 +90,21 @@ func ConfigSyncMetadata(set *fieldpath.Set) *fieldpath.Set {
 		}
 	})
 	return csSet
+}
+
+// OnlyNotifiedAnnotation returns if the filePath set only includes the notified annotation.
+func OnlyNotifiedAnnotation(set *fieldpath.Set) bool {
+	hasNotificationAnnotation := false
+	hasOtherFields := false
+	set.Leaves().Iterate(func(path fieldpath.Path) {
+		s := path.String()
+		if s == util.NotifiedAnnotationPath {
+			hasNotificationAnnotation = true
+		} else if s != ".metadata.managedFields" {
+			hasOtherFields = true
+		}
+	})
+	return hasNotificationAnnotation && !hasOtherFields
 }
 
 // DeclaredFields returns the declared fields for the given Object.

@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"kpt.dev/configsync/pkg/core"
 	csmetadata "kpt.dev/configsync/pkg/metadata"
@@ -146,6 +147,16 @@ func roleForTest(muts ...core.MetaMutator) *rbacv1.Role {
 	for _, mut := range muts {
 		mut(role)
 	}
+	return role
+}
+
+func roleWithManagedFields(role *rbacv1.Role) *rbacv1.Role {
+	role.ObjectMeta.SetManagedFields([]metav1.ManagedFieldsEntry{
+		{
+			Manager:   "test",
+			Operation: "Update",
+		},
+	})
 	return role
 }
 
@@ -339,6 +350,90 @@ func TestConfigSyncMetadata(t *testing.T) {
 			got := ConfigSyncMetadata(set)
 			if got.String() != tc.want {
 				t.Errorf("got %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOnlyNotifiedAnnotation(t *testing.T) {
+	testCases := []struct {
+		name   string
+		oldObj client.Object
+		newObj client.Object
+		want   bool
+	}{
+		{
+			name: "only notified annotation",
+			oldObj: roleForTest(
+				core.Annotations(map[string]string{}),
+			),
+			newObj: roleForTest(
+				core.Annotations(map[string]string{
+					"notified.notifications.argoproj.io": `{"2ed5e04c036285813fb103bffdcb07474db1b0c7:on-sync-synced:[0].SLx7mMOXJENPeBBTTVGngQMOezM:email:test@gmail.com":1669076152}`,
+				}),
+			),
+			want: true,
+		},
+		{
+			name: "with notified annotation and the ignored `.metadata.managedFields` field",
+			oldObj: roleForTest(
+				core.Annotations(map[string]string{}),
+			),
+			newObj: roleWithManagedFields(roleForTest(
+				core.Annotations(map[string]string{
+					"notified.notifications.argoproj.io": `{"2ed5e04c036285813fb103bffdcb07474db1b0c7:on-sync-synced:[0].SLx7mMOXJENPeBBTTVGngQMOezM:email:test@gmail.com":1669076152}`,
+				}),
+			)),
+			want: true,
+		},
+		{
+			name:   "Without notified annotation",
+			oldObj: roleForTest(),
+			newObj: roleForTest(
+				core.Annotations(map[string]string{
+					"hello": "goodbye",
+				}),
+			),
+			want: false,
+		},
+		{
+			name:   "without any notifications, but other labels",
+			oldObj: roleForTest(),
+			newObj: roleForTest(
+				core.Labels(map[string]string{
+					"hello": "goodbye",
+				}),
+			),
+			want: false,
+		},
+		{
+			name:   "With notified annotation and other fields",
+			oldObj: roleForTest(),
+			newObj: roleForTest(
+				core.Annotations(map[string]string{
+					"notified.notifications.argoproj.io": `{"2ed5e04c036285813fb103bffdcb07474db1b0c7:on-sync-synced:[0].SLx7mMOXJENPeBBTTVGngQMOezM:email:test@gmail.com":1669076152}`,
+					"hello":                              "goodbye",
+				}),
+			),
+			want: false,
+		},
+	}
+
+	vc, err := openapitest.ValueConverterForTest()
+	if err != nil {
+		t.Fatalf("Failed to create ValueConverter: %v", err)
+	}
+	od := &ObjectDiffer{vc}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			diffSet, err := od.FieldDiff(tc.oldObj, tc.newObj)
+			if err != nil {
+				t.Fatalf("Failed to generate field diff set for object %q: %v", core.GKNN(tc.oldObj), err)
+			}
+			got := OnlyNotifiedAnnotation(diffSet)
+			if got != tc.want {
+				t.Errorf("got %t, want %t", got, tc.want)
 			}
 		})
 	}

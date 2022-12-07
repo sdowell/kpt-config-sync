@@ -46,6 +46,7 @@ import (
 	"kpt.dev/configsync/pkg/reconcilermanager"
 	"kpt.dev/configsync/pkg/rootsync"
 	"kpt.dev/configsync/pkg/status"
+	"kpt.dev/configsync/pkg/util"
 	"kpt.dev/configsync/pkg/util/compare"
 	"kpt.dev/configsync/pkg/validate/raw/validate"
 	kstatus "sigs.k8s.io/cli-utils/pkg/kstatus/status"
@@ -245,7 +246,7 @@ func (r *RootSyncReconciler) Reconcile(ctx context.Context, req controllerruntim
 		return controllerruntime.Result{}, errors.Wrap(err, "ClusterRoleBinding reconcile failed")
 	}
 
-	notificationEnabled, err := r.notificationEnabled(ctx, rs)
+	notificationEnabled, err := util.NotificationEnabled(ctx, r.client, rs.Namespace, rs.Annotations, rs.Spec.NotificationConfig)
 	if err != nil {
 		log.Error(err, "Check notification subscription failed")
 		rootsync.SetStalled(rs, "Notification", err)
@@ -805,30 +806,4 @@ func (r *RootSyncReconciler) mutationsFor(ctx context.Context, rs *v1beta1.RootS
 		templateSpec.Containers = updatedContainers
 		return nil
 	}
-}
-
-// notificationEnabled returns whether the notification is enabled for the RootSync.
-func (r *RootSyncReconciler) notificationEnabled(ctx context.Context, rs *v1beta1.RootSync) (bool, error) {
-	for key := range rs.Annotations {
-		if strings.HasPrefix(key, reconcilermanager.SubscribeAnnotationPrefix) {
-			return true, nil
-		}
-	}
-
-	if rs.Spec.NotificationConfig != nil && rs.Spec.NotificationConfig.ConfigMapRef != nil && rs.Spec.NotificationConfig.ConfigMapRef.Name != "" {
-		cm := &corev1.ConfigMap{}
-		cmObjectKey := types.NamespacedName{
-			Namespace: rs.Namespace,
-			Name:      rs.Spec.NotificationConfig.ConfigMapRef.Name,
-		}
-		if err := r.client.Get(ctx, cmObjectKey, cm); err != nil {
-			if apierrors.IsNotFound(err) {
-				return false, nil
-			}
-			return false, err
-		}
-		_, found := cm.Data["subscriptions"]
-		return found, nil
-	}
-	return false, nil
 }
