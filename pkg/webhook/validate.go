@@ -22,6 +22,7 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
@@ -135,32 +136,39 @@ func (v *Validator) allowNotificationAnnotation(oldObj, newObj client.Object, us
 	var enabled bool
 	var err error
 	var reconciler string
-	switch newObj.GetObjectKind().GroupVersionKind().Kind {
-	case kinds.RootSyncV1Beta1().Kind:
-		rs, ok := newObj.(*v1beta1.RootSync)
-		if !ok {
-			klog.Errorf("failed to convert the object into RootSync, object type is %T", newObj)
+	switch newObj.(type) {
+	case *unstructured.Unstructured:
+		switch newObj.GetObjectKind().GroupVersionKind().Kind {
+		case kinds.RootSyncV1Beta1().Kind:
+			rs := &v1beta1.RootSync{}
+			unstructuredContent := newObj.(*unstructured.Unstructured).UnstructuredContent()
+			if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredContent, rs); err != nil {
+				klog.Errorf("failed to convert the unstructured object into RootSync: %v", err)
+				return false
+			}
+			enabled, err = util.NotificationEnabled(context.Background(), v.client, newObj.GetNamespace(), newObj.GetAnnotations(), rs.Spec.NotificationConfig)
+			if err != nil {
+				klog.Errorf("unable to determine whether notification is enabled for %s %s/%s: %v", rs.Kind, rs.Namespace, rs.Name, err)
+				return false
+			}
+			reconciler = core.RootReconcilerName(newObj.GetName())
+		case kinds.RepoSyncV1Beta1().Kind:
+			rs := &v1beta1.RepoSync{}
+			unstructuredContent := newObj.(*unstructured.Unstructured).UnstructuredContent()
+			if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredContent, rs); err != nil {
+				klog.Errorf("failed to convert the unstructured object into RepoSync: %v", err)
+				return false
+			}
+			enabled, err = util.NotificationEnabled(context.Background(), v.client, newObj.GetNamespace(), newObj.GetAnnotations(), rs.Spec.NotificationConfig)
+			if err != nil {
+				klog.Errorf("unable to determine whether notification is enabled for %s %s/%s: %v", rs.Kind, rs.Namespace, rs.Name, err)
+				return false
+			}
+			reconciler = core.NsReconcilerName(rs.GetNamespace(), rs.GetName())
+		default: // newObj kind is neither RootSync nor RepoSync
 			return false
 		}
-		enabled, err = util.NotificationEnabled(context.Background(), v.client, newObj.GetNamespace(), newObj.GetAnnotations(), rs.Spec.NotificationConfig)
-		if err != nil {
-			klog.Errorf("unable to determine whether notification is enabled for %s %s/%s: %v", rs.Kind, rs.Namespace, rs.Name, err)
-			return false
-		}
-		reconciler = core.RootReconcilerName(newObj.GetName())
-	case kinds.RepoSyncV1Beta1().Kind:
-		rs, ok := newObj.(*v1beta1.RepoSync)
-		if !ok {
-			klog.Errorf("failed to convert the object into RepoSync, object type is %T", newObj)
-			return false
-		}
-		enabled, err = util.NotificationEnabled(context.Background(), v.client, newObj.GetNamespace(), newObj.GetAnnotations(), rs.Spec.NotificationConfig)
-		if err != nil {
-			klog.Errorf("unable to determine whether notification is enabled for %s %s/%s: %v", rs.Kind, rs.Namespace, rs.Name, err)
-			return false
-		}
-		reconciler = core.NsReconcilerName(rs.GetNamespace(), rs.GetName())
-	default:
+	default: // newObj type is not unstructured
 		return false
 	}
 
@@ -169,7 +177,6 @@ func (v *Validator) allowNotificationAnnotation(oldObj, newObj client.Object, us
 	}
 
 	if reconciler != username {
-		klog.Errorf("username %q doesn't match the reconciler name %q", username, reconciler)
 		return false
 	}
 
