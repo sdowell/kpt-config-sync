@@ -26,6 +26,7 @@ import (
 	"kpt.dev/configsync/pkg/util"
 	"kpt.dev/configsync/pkg/util/log"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/yaml"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -65,7 +66,7 @@ func pollingPeriod(envName string, defaultValue time.Duration) time.Duration {
 		pollingFreq, err := time.ParseDuration(val)
 		if err != nil {
 			panic(errors.Wrapf(err, "failed to parse environment variable %q,"+
-					"got value: %v, want err: nil", envName, pollingFreq))
+				"got value: %v, want err: nil", envName, pollingFreq))
 		}
 		return pollingFreq
 	}
@@ -107,6 +108,41 @@ func (sh *statusHook) Levels() []logrus.Level {
 		logrus.ErrorLevel,
 		logrus.DebugLevel,
 	}
+}
+
+func toUnstructured(obj metav1.Object) (*unstructured.Unstructured, error) {
+	switch obj.(type) {
+	case *unstructured.Unstructured:
+		switch *apiKind {
+		case kinds.RootSyncV1Beta1().Kind:
+			rs := &v1beta1.RootSync{}
+			unstructuredContent := obj.(*unstructured.Unstructured).UnstructuredContent()
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredContent, rs); err != nil {
+				return nil, fmt.Errorf("failed to convert the unstructured object into RootSync: %v", err)
+			}
+			return kinds.ToUnstructured(rs, core.Scheme)
+		case kinds.RepoSyncV1Beta1().Kind:
+			rs := &v1beta1.RepoSync{}
+			unstructuredContent := obj.(*unstructured.Unstructured).UnstructuredContent()
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredContent, rs); err != nil {
+				return nil, fmt.Errorf("failed to convert the unstructured object into RepoSync: %v", err)
+			}
+			return kinds.ToUnstructured(rs, core.Scheme)
+		}
+	case *v1beta1.RootSync:
+		rs, ok := obj.(*v1beta1.RootSync)
+		if !ok {
+			return nil, fmt.Errorf("object must be v1beta1.RootSync but is %T", rs)
+		}
+		return kinds.ToUnstructured(rs, core.Scheme)
+	case *v1beta1.RepoSync:
+		rs, ok := obj.(*v1beta1.RepoSync)
+		if !ok {
+			return nil, fmt.Errorf("object must be v1beta1.RepoSync but is %T", rs)
+		}
+		return kinds.ToUnstructured(rs, core.Scheme)
+	}
+	return nil, fmt.Errorf("unknown object type %T", obj)
 }
 
 func main() {
@@ -166,43 +202,21 @@ func main() {
 		notificationClient,
 		notificationInformer,
 		notificationsFactory,
-		controller.WithToUnstructured(func(obj metav1.Object) (*unstructured.Unstructured, error) {
-			switch obj.(type) {
-			case *unstructured.Unstructured:
-				switch *apiKind {
-				case kinds.RootSyncV1Beta1().Kind:
-					rs := &v1beta1.RootSync{}
-					unstructuredContent := obj.(*unstructured.Unstructured).UnstructuredContent()
-					if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredContent, rs); err != nil {
-						return nil, fmt.Errorf("failed to convert the unstructured object into RootSync: %v", err)
-					}
-					return kinds.ToUnstructured(rs, core.Scheme)
-				case kinds.RepoSyncV1Beta1().Kind:
-					rs := &v1beta1.RepoSync{}
-					unstructuredContent := obj.(*unstructured.Unstructured).UnstructuredContent()
-					if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredContent, rs); err != nil {
-						return nil, fmt.Errorf("failed to convert the unstructured object into RepoSync: %v", err)
-					}
-					return kinds.ToUnstructured(rs, core.Scheme)
-				}
-			case *v1beta1.RootSync:
-				rs, ok := obj.(*v1beta1.RootSync)
-				if !ok {
-					return nil, fmt.Errorf("object must be v1beta1.RootSync but is %T", rs)
-				}
-				return kinds.ToUnstructured(rs, core.Scheme)
-			case *v1beta1.RepoSync:
-				rs, ok := obj.(*v1beta1.RepoSync)
-				if !ok {
-					return nil, fmt.Errorf("object must be v1beta1.RepoSync but is %T", rs)
-				}
-				return kinds.ToUnstructured(rs, core.Scheme)
-			}
-			return nil, fmt.Errorf("unknown object type %T", obj)
-		}),
+		controller.WithToUnstructured(toUnstructured),
 		controller.WithSendCallback(func(resource metav1.Object, trigger string, dest services.Destination, err error) {
 			klog.Infof("Send callback with %s/%s. Trigger: %s. Service: %s. Recipient: %s. Err: %v.",
 				resource.GetNamespace(), resource.GetName(), trigger, dest.Service, dest.Recipient, err)
+			un, err := toUnstructured(resource)
+			if err != nil {
+				klog.Infof("Send callback: failed to parse resource to unstructured")
+				return
+			}
+			resYaml, err := yaml.Marshal(un)
+			if err != nil {
+				klog.Infof("Send callback: failed to marshal to yaml")
+				return
+			}
+			klog.Infof("resource:\n%v", string(resYaml))
 		}),
 	)
 
