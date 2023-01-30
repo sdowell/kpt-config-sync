@@ -173,6 +173,7 @@ func (p *root) setSourceStatusWithRetries(ctx context.Context, newStatus sourceS
 
 	currentRS := rs.DeepCopy()
 
+	setLastCommit(&rs.Status.Status, newStatus.commit)
 	setSourceStatusFields(&rs.Status.Source, p, newStatus, denominator)
 
 	continueSyncing := (rs.Status.Source.ErrorSummary.TotalCount == 0)
@@ -274,6 +275,7 @@ func (p *root) setRenderingStatusWithRetires(ctx context.Context, newStatus rend
 
 	currentRS := rs.DeepCopy()
 
+	setLastCommit(&rs.Status.Status, newStatus.commit)
 	setRenderingStatusFields(&rs.Status.Rendering, p, newStatus, denominator)
 
 	continueSyncing := (rs.Status.Rendering.ErrorSummary.TotalCount == 0)
@@ -373,6 +375,7 @@ func (p *root) setSyncStatusWithRetries(ctx context.Context, newStatus syncStatu
 
 	currentRS := rs.DeepCopy()
 
+	setLastCommit(&rs.Status.Status, newStatus.commit)
 	setSyncStatusFields(&rs.Status.Status, newStatus, denominator)
 
 	errorSources, errorSummary := summarizeErrors(rs.Status.Source, rs.Status.Sync)
@@ -434,6 +437,10 @@ func setSyncStatusErrors(syncStatus *v1beta1.Status, cse []v1beta1.ConfigSyncErr
 		Truncated:  denominator != 1,
 	}
 	syncStatus.Sync.Errors = cse[0 : len(cse)/denominator]
+}
+
+func setLastCommit(syncStatus *v1beta1.Status, commit string) {
+	syncStatus.LastCommit = commit
 }
 
 // summarizeErrors summarizes the errors from `sourceStatus` and `syncStatus`, and returns an ErrorSource slice and an ErrorSummary.

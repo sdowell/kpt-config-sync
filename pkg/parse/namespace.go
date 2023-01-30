@@ -160,6 +160,7 @@ func (p *namespace) setSourceStatusWithRetries(ctx context.Context, newStatus so
 
 	currentRS := rs.DeepCopy()
 
+	setLastCommit(&rs.Status.Status, newStatus.commit)
 	setSourceStatusFields(&rs.Status.Source, p, newStatus, denominator)
 
 	continueSyncing := (rs.Status.Source.ErrorSummary.TotalCount == 0)
@@ -222,6 +223,7 @@ func (p *namespace) setRenderingStatusWithRetires(ctx context.Context, newStatus
 
 	currentRS := rs.DeepCopy()
 
+	setLastCommit(&rs.Status.Status, newStatus.commit)
 	setRenderingStatusFields(&rs.Status.Rendering, p, newStatus, denominator)
 
 	continueSyncing := (rs.Status.Rendering.ErrorSummary.TotalCount == 0)
@@ -282,6 +284,7 @@ func (p *namespace) setSyncStatusWithRetries(ctx context.Context, newStatus sync
 
 	currentRS := rs.DeepCopy()
 
+	setLastCommit(&rs.Status.Status, newStatus.commit)
 	setSyncStatusFields(&rs.Status.Status, newStatus, denominator)
 
 	errorSources, errorSummary := summarizeErrors(rs.Status.Source, rs.Status.Sync)

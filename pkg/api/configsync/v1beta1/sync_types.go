@@ -35,6 +35,11 @@ type Status struct {
 	// +optional
 	LastSyncedCommit string `json:"lastSyncedCommit,omitempty"`
 
+	// lastCommit describes the most recent hash that is processed.
+	// It can be a git commit hash, or an OCI image digest.
+	// +optional
+	LastCommit string `json:"lastCommit,omitempty"`
+
 	// source contains fields describing the status of a *Sync's source of
 	// truth.
 	// +optional

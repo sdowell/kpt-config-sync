@@ -1532,11 +1532,22 @@ spec:
                   - type
                   type: object
                 type: array
+              lastCommit:
+                description: lastCommit describes the most recent hash that is processed.
+                  It can be a git commit hash, or an OCI image digest.
+                type: string
               lastSyncedCommit:
                 description: lastSyncedCommit describes the most recent hash that
                   is successfully synced. It can be a git commit hash, or an OCI image
                   digest.
                 type: string
+              notifications:
+                properties:
+                  commit:
+                    type: string
+                  message:
+                    type: string
+                type: object
               observedGeneration:
                 description: observedGeneration is the most recent generation observed
                   for the sync resource. It corresponds to the it's generation, which
