@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"os"
@@ -145,6 +147,91 @@ func toUnstructured(obj metav1.Object) (*unstructured.Unstructured, error) {
 	return nil, fmt.Errorf("unknown object type %T", obj)
 }
 
+func join(arr interface{}, sep string) string {
+	sArr, ok := arr.([]string)
+	if !ok {
+		return ""
+	}
+	return strings.Join(sArr, sep)
+}
+
+func hash(input string) string {
+	h := sha1.New()
+	_, _ = h.Write([]byte(input))
+	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+}
+
+// return the commit from the Syncing condition
+func lastCommit(obj *unstructured.Unstructured) func() string {
+	cached := false
+	commit := ""
+	return func() string {
+		if cached {
+			return commit
+		}
+		switch *apiKind {
+		case kinds.RootSyncV1Beta1().Kind:
+			rs := &v1beta1.RootSync{}
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), rs); err != nil {
+				return commit
+			}
+			for _, c := range rs.Status.Conditions {
+				if c.Type == v1beta1.RootSyncSyncing {
+					commit = c.Commit
+					return commit
+				}
+			}
+		case kinds.RepoSyncV1Beta1().Kind:
+			rs := &v1beta1.RepoSync{}
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), rs); err != nil {
+				return commit
+			}
+			for _, c := range rs.Status.Conditions {
+				if c.Type == v1beta1.RepoSyncSyncing {
+					commit = c.Commit
+					return commit
+				}
+			}
+		}
+		return commit
+	}
+
+}
+
+// return an array of all ConfigSyncError from the various status objects
+func configSyncErrors(obj *unstructured.Unstructured) func() []v1beta1.ConfigSyncError {
+	var cached bool
+	var errs []v1beta1.ConfigSyncError
+	return func() []v1beta1.ConfigSyncError {
+		if cached {
+			return errs
+		}
+		cached = true
+		var status *v1beta1.Status
+		switch *apiKind {
+		case kinds.RootSyncV1Beta1().Kind:
+			rs := &v1beta1.RootSync{}
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), rs); err != nil {
+				return errs
+			}
+			status = &rs.Status.Status
+		case kinds.RepoSyncV1Beta1().Kind:
+			rs := &v1beta1.RepoSync{}
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), rs); err != nil {
+				return errs
+			}
+			status = &rs.Status.Status
+		}
+		if status == nil {
+			return errs
+		}
+		errs = append(errs, status.Source.Errors...)
+		errs = append(errs, status.Rendering.Errors...)
+		errs = append(errs, status.Sync.Errors...)
+		return errs
+	}
+}
+
 func main() {
 	log.Setup()
 	ctrl.SetLogger(klogr.New())
@@ -169,7 +256,17 @@ func main() {
 		SecretName:    *secretName,
 		InitGetVars: func(cfg *api.Config, configMap *v1.ConfigMap, secret *v1.Secret) (api.GetVars, error) {
 			return func(obj map[string]interface{}, dest services.Destination) map[string]interface{} {
-				return map[string]interface{}{ObjectKey: obj}
+				return map[string]interface{}{
+					ObjectKey: obj,
+					"strings": map[string]interface{}{
+						"Hash": hash,
+						"Join": join,
+					},
+					"utils": map[string]interface{}{
+						"LastCommit":       lastCommit(&unstructured.Unstructured{Object: obj}),
+						"ConfigSyncErrors": configSyncErrors(&unstructured.Unstructured{Object: obj}),
+					},
+				}
 			}, nil
 		},
 	}, *resourceNamespace, secrets, configMaps)
