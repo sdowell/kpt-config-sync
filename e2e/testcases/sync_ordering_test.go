@@ -17,7 +17,6 @@ package e2e
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -442,7 +441,7 @@ func TestDependencyWithReconciliation(t *testing.T) {
 	nt.WaitForRepoSyncs()
 
 	var pod1, pod2 *corev1.Pod
-	_, err := nomostest.Retry(30*time.Second, func() error {
+	_, err := nomostest.Retry(nt.DefaultWaitTimeout, func() error {
 		pod1 = &corev1.Pod{}
 		pod2 = &corev1.Pod{}
 		var errs error
@@ -466,7 +465,7 @@ func TestDependencyWithReconciliation(t *testing.T) {
 	nt.RootRepos[configsync.RootSyncName].CommitAndPush("Remove pod1 and pod2")
 	nt.WaitForRepoSyncs()
 
-	_, err = nomostest.Retry(30*time.Second, func() error {
+	_, err = nomostest.Retry(nt.DefaultWaitTimeout, func() error {
 		var errs error
 		errs = multierr.Append(errs, nt.ValidateNotFound(pod1Name, namespaceName, &corev1.Pod{}))
 		errs = multierr.Append(errs, nt.ValidateNotFound(pod2Name, namespaceName, &corev1.Pod{}))
@@ -487,7 +486,7 @@ func TestDependencyWithReconciliation(t *testing.T) {
 	nt.WaitForRootSyncSyncError(configsync.RootSyncName, applier.ApplierErrorCode,
 		"skipped apply of Pod, bookstore/pod4: dependency apply reconcile timeout: bookstore_pod3__Pod")
 
-	_, err = nomostest.Retry(30*time.Second, func() error {
+	_, err = nomostest.Retry(nt.DefaultWaitTimeout, func() error {
 		var errs error
 		errs = multierr.Append(errs, nt.Validate("pod3", namespaceName, &corev1.Pod{}, isPodNotReady))
 		errs = multierr.Append(errs, nt.ValidateNotFound("pod4", namespaceName, &corev1.Pod{}))
@@ -516,7 +515,7 @@ func TestDependencyWithReconciliation(t *testing.T) {
 	nt.RootRepos[configsync.RootSyncName].CommitAndPush("Add pod5 and pod6")
 	nt.WaitForRepoSyncs()
 
-	_, err = nomostest.Retry(30*time.Second, func() error {
+	_, err = nomostest.Retry(nt.DefaultWaitTimeout, func() error {
 		var errs error
 		errs = multierr.Append(errs, nt.Validate("pod5", namespaceName, &corev1.Pod{}, isPodReady))
 		errs = multierr.Append(errs, nt.Validate("pod6", namespaceName, &corev1.Pod{}, isPodReady))
@@ -531,7 +530,7 @@ func TestDependencyWithReconciliation(t *testing.T) {
 	nt.RootRepos[configsync.RootSyncName].CommitAndPush("Remove pod5")
 	nt.WaitForRootSyncSyncError(configsync.RootSyncName, applier.ApplierErrorCode, "dependency")
 
-	_, err = nomostest.Retry(30*time.Second, func() error {
+	_, err = nomostest.Retry(nt.DefaultWaitTimeout, func() error {
 		var errs error
 		errs = multierr.Append(errs, nt.Validate("pod5", namespaceName, &corev1.Pod{}))
 		errs = multierr.Append(errs, nt.Validate("pod6", namespaceName, &corev1.Pod{}))
@@ -546,7 +545,7 @@ func TestDependencyWithReconciliation(t *testing.T) {
 	nt.RootRepos[configsync.RootSyncName].CommitAndPush("Remove pod6")
 	nt.WaitForRepoSyncs()
 
-	_, err = nomostest.Retry(30*time.Second, func() error {
+	_, err = nomostest.Retry(nt.DefaultWaitTimeout, func() error {
 		var errs error
 		errs = multierr.Append(errs, nt.ValidateNotFound("pod5", namespaceName, &corev1.Pod{}))
 		errs = multierr.Append(errs, nt.ValidateNotFound("pod6", namespaceName, &corev1.Pod{}))
