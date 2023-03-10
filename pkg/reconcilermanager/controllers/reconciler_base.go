@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -555,4 +556,29 @@ func (r *reconcilerBase) isLastReconciled(nn types.NamespacedName, resourceVersi
 		return false
 	}
 	return resourceVersion == lastReconciled
+}
+
+func (r *reconcilerBase) notificationEnabled(ctx context.Context, rsNamespace string, annotations map[string]string, notificationConfig *v1beta1.NotificationConfig) (bool, error) {
+	for key := range annotations {
+		if strings.HasPrefix(key, util.SubscribeAnnotationPrefix) {
+			return true, nil
+		}
+	}
+
+	if notificationConfig != nil && notificationConfig.ConfigMapRef != nil && notificationConfig.ConfigMapRef.Name != "" {
+		cm := &corev1.ConfigMap{}
+		cmObjectKey := types.NamespacedName{
+			Namespace: rsNamespace,
+			Name:      notificationConfig.ConfigMapRef.Name,
+		}
+		if err := r.client.Get(ctx, cmObjectKey, cm); err != nil {
+			if apierrors.IsNotFound(err) {
+				return false, fmt.Errorf("notification ConfigMap %s not found in the %s namespace", cmObjectKey.Name, cmObjectKey.Namespace)
+			}
+			return false, err
+		}
+		_, found := cm.Data[util.MultiSubscriptionsField]
+		return found, nil
+	}
+	return false, nil
 }

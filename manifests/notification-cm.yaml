@@ -1,0 +1,46 @@
+# Copyright 2022 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notification-cm
+  namespace: config-management-system
+data:
+  trigger.on-sync-synced: |
+    - when: any(sync.status.conditions, {.type == 'Syncing' && .status == 'False' && .message == 'Sync Completed'})
+      oncePer: sync.status.lastSyncedCommit
+      send: [sync-synced]
+
+  template.sync-synced: |
+    message: |
+      {{.sync.kind}} {{.sync.metadata.name}} is synced!
+    github:
+      repoURLPath: "{{.sync.spec.git.repo}}"
+      revisionPath: "{{.sync.status.lastSyncedCommit}}"
+      status:
+        state: success
+        label: "continuous-delivery/{{.sync.metadata.name}}"
+        targetURL: ""
+
+  trigger.on-reconciling: |
+    - when: any(sync.status.conditions, {.type == 'Reconciling' && .status == 'True'})
+      send: [reconciling]
+
+  template.reconciling: |
+    message: |
+      {{.sync.kind}} {{.sync.metadata.name}} is still reconciling!
+
+  service.email.gmail: '{ username: $email-username, password: $email-password, host:
+      smtp.gmail.com, port: 465, from: $email-username }'

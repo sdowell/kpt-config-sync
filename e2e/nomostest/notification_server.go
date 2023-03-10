@@ -25,6 +25,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"kpt.dev/configsync/pkg/api/configsync/v1beta1"
 	"kpt.dev/configsync/pkg/core"
 	"kpt.dev/configsync/pkg/kinds"
 	"kpt.dev/configsync/pkg/testing/fake"
@@ -234,4 +236,94 @@ func notificationWebhookService() *corev1.Service {
 		{Name: "http", Port: TestNotificationWebhookPort},
 	}
 	return service
+}
+
+const notificationConfigMapRef = "test-notification-cm"
+const notificationSecretRef = "test-notification-secret"
+
+func SubscribeRepoSyncNotification(nt *NT, rSyncRef types.NamespacedName) error {
+	repoSync := &v1beta1.RepoSync{}
+	err := nt.Get(rSyncRef.Name, rSyncRef.Namespace, repoSync)
+	if err != nil {
+		return err
+	}
+	annotations := repoSync.GetAnnotations()
+	annotations["configsync.gke.io/subscribe.on-sync-synced.local"] = ""
+	repoSync.Spec.NotificationConfig = &v1beta1.NotificationConfig{
+		ConfigMapRef: &v1beta1.ConfigMapReference{Name: notificationConfigMapRef},
+		SecretRef:    &v1beta1.SecretReference{Name: notificationSecretRef},
+	}
+	err = nt.Update(repoSync)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func SubscribeRootSyncNotification(nt *NT, rSyncRef types.NamespacedName) error {
+	rootSync := &v1beta1.RootSync{}
+	err := nt.Get(rSyncRef.Name, rSyncRef.Namespace, rootSync)
+	if err != nil {
+		return err
+	}
+	annotations := rootSync.GetAnnotations()
+	annotations["configsync.gke.io/subscribe.on-sync-synced.local"] = ""
+	rootSync.Spec.NotificationConfig = &v1beta1.NotificationConfig{
+		ConfigMapRef: &v1beta1.ConfigMapReference{Name: notificationConfigMapRef},
+		SecretRef:    &v1beta1.SecretReference{Name: notificationSecretRef},
+	}
+	err = nt.Update(rootSync)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func NotificationConfigMap(nt *NT, ns string) (*corev1.ConfigMap, error) {
+	cm := &corev1.ConfigMap{}
+	cm.Name = notificationConfigMapRef
+	cm.Namespace = ns
+	cm.Data = map[string]string{
+		// Trigger
+		"trigger.on-sync-synced": `- when: any(sync.status.conditions, {.commit != nil && .type == 'Syncing' && .status == 'False' && .message == 'Sync Completed' && .errorSourceRefs == nil && .errors == nil})
+  oncePer: sync.status.lastSyncedCommit
+  send: [sync-synced]`,
+		// Template
+		"template.sync-synced": `webhook:
+  local:
+    method: POST
+    path: /
+    body: |
+      {
+        "content": {
+          "raw": "{{.sync.kind}} {{.sync.metadata.name}} is synced!"
+        }
+      }`,
+		// Service
+		"service.webhook.local": fmt.Sprintf(
+			`url: http://%s.%s:%d
+headers: #optional headers
+- name: Content-Type
+  value: application/json
+basicAuth:
+  username: $username
+  password: $password`, testNotificationWebhookServer, testNotificationWebhookNamespace, TestNotificationWebhookPort),
+	}
+	err := nt.Create(cm)
+	if err != nil {
+		return cm, err
+	}
+	return cm, nil
+}
+
+func NotificationSecret(nt *NT, ns string) (*corev1.Secret, error) {
+	secret := &corev1.Secret{}
+	secret.Name = notificationSecretRef
+	secret.Namespace = ns
+	secret.Data = map[string][]byte{
+		"username": []byte("user"),
+		"password": []byte("pass"),
+	}
+	err := nt.Create(secret)
+	return secret, err
 }

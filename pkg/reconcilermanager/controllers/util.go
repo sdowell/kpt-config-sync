@@ -29,6 +29,7 @@ import (
 	"kpt.dev/configsync/pkg/declared"
 	"kpt.dev/configsync/pkg/importer/filesystem"
 	"kpt.dev/configsync/pkg/reconcilermanager"
+	"kpt.dev/configsync/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -73,6 +74,38 @@ func hydrationEnvs(sourceType string, gitConfig *v1beta1.Git, ociConfig *v1beta1
 			Name:  reconcilermanager.HydrationPollingPeriod,
 			Value: pollPeriod,
 		})
+	return result
+}
+
+// notificationEnvs returns environment variables for the notification controller.
+func notificationEnvs(kind, rsNamespace, rsName string, notificationConfig *v1beta1.NotificationConfig) []corev1.EnvVar {
+	var result []corev1.EnvVar
+	result = append(result,
+		corev1.EnvVar{
+			Name:  util.NotificationApiKind,
+			Value: kind,
+		},
+		corev1.EnvVar{
+			Name:  util.NotificationConfigMapName,
+			Value: notificationConfig.ConfigMapRef.Name,
+		},
+		corev1.EnvVar{
+			Name:  util.NotificationResourceName,
+			Value: rsName,
+		},
+		corev1.EnvVar{
+			Name:  util.NotificationResourceNamespace,
+			Value: rsNamespace,
+		},
+	)
+	if notificationConfig.SecretRef != nil && notificationConfig.SecretRef.Name != "" {
+		result = append(result,
+			corev1.EnvVar{
+				Name:  util.NotificationSecretName,
+				Value: notificationConfig.SecretRef.Name,
+			},
+		)
+	}
 	return result
 }
 
