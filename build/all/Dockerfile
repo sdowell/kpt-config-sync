@@ -65,7 +65,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on \
     ./cmd/hydration-controller \
     ./cmd/admission-webhook \
     ./cmd/oci-sync \
-    ./cmd/helm-sync
+    ./cmd/helm-sync \
+    ./cmd/notification
 
 # Concatenate vendored licenses into LICENSES.txt
 # Built in the container to include binary licenses (helm & kustomize)
@@ -180,3 +181,15 @@ USER nonroot:nonroot
 ENV HOME="/nomos"
 ENV PATH="/opt/nomos/bin:${PATH}"
 ENTRYPOINT ["/opt/nomos/bin/nomos"]
+
+# Notification image
+FROM gcr.io/distroless/static:nonroot as notification
+WORKDIR /
+COPY --from=bins /go/bin/notification notification
+USER nonroot:nonroot
+
+# License file required for on-prem release.
+COPY LICENSE LICENSE
+COPY LICENSES.txt LICENSES.txt
+
+ENTRYPOINT ["/notification"]
