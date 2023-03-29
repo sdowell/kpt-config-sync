@@ -51,7 +51,7 @@ build-junit-report-cli: pull-buildenv buildenv-dirs
 .PHONY: build-images
 build-images: license
 	@echo "+++ Building the Reconciler image: $(RECONCILER_TAG)"
-	@docker buildx build $(DOCKER_BUILD_QUIET) \
+	docker buildx build $(DOCKER_BUILD_QUIET) \
 		--target $(RECONCILER_IMAGE) \
 		-t $(RECONCILER_TAG) \
 		-f build/all/Dockerfile \
