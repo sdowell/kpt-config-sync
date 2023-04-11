@@ -121,13 +121,11 @@ func (pf *PortForwarder) setPort(cmd *exec.Cmd, port int, pod string, async bool
 	pf.logger.Infof("updating port-forward %s:%d -> %s:%d", pf.pod, pf.localPort, pod, port)
 	if async {
 		pf.mux.Lock()
+		defer pf.mux.Unlock()
 	}
 	pf.cmd = cmd
 	pf.localPort = port
 	pf.pod = pod
-	if async {
-		pf.mux.Unlock()
-	}
 	if pf.setPortCallback != nil {
 		pf.setPortCallback(port, pod)
 	}

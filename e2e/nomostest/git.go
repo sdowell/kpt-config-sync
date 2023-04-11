@@ -521,11 +521,7 @@ func (g *Repository) Push(refspec string, flags ...string) {
 	}
 }
 
-func (g *Repository) pushAllToRemote() {
-	remote, err := g.GitProvider.RemoteURL(g.RemoteRepoName)
-	if err != nil {
-		g.T.Errorf("failed to get remote URL: %v", err)
-	}
+func (g *Repository) pushAllToRemote(remote string) {
 	cmd := g.gitCmd("push", remote, "--all")
 	out, err := cmd.CombinedOutput()
 	if err != nil {

@@ -71,7 +71,7 @@ func (b *BitbucketClient) Type() string {
 
 // RemoteURL returns the Git URL for the Bitbucket repository.
 // name refers to the repo name in the format of <NAMESPACE>/<NAME> of RootSync|RepoSync.
-func (b *BitbucketClient) RemoteURL(name string) (string, error) {
+func (b *BitbucketClient) RemoteURL(name string, _ ...RemoteURLOpt) (string, error) {
 	return b.SyncURL(name), nil
 }
 

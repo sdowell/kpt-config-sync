@@ -606,8 +606,13 @@ func (nt *NT) portForwardGitServer() *portforwarder.PortForwarder {
 		// re-init all repos
 		InitGitRepos(nt, allRepos...)
 		// attempt to recover by re-pushing the local repo states
-		for _, remoteRepo := range nt.RemoteRepositories {
-			remoteRepo.pushAllToRemote()
+		for name, remoteRepo := range nt.RemoteRepositories {
+			// provide local port, so we don't create a deadlock in the callback
+			remoteURL, err := remoteRepo.GitProvider.RemoteURL(name.String(), gitproviders.WithLocalPort(newPort))
+			if err != nil {
+				nt.Logger.Info(err)
+			}
+			remoteRepo.pushAllToRemote(remoteURL)
 		}
 		prevPodName = podName
 	}

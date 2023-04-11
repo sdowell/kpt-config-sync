@@ -34,7 +34,7 @@ type GitProvider interface {
 	// For the testing git-server, RemoteURL uses localhost and forwarded port, while SyncURL uses the DNS.
 	// For other git providers, RemoteURL should be the same as SyncURL.
 	// name refers to the repo name in the format of <NAMESPACE>/<NAME> of RootSync|RepoSync.
-	RemoteURL(name string) (string, error)
+	RemoteURL(name string, opts ...RemoteURLOpt) (string, error)
 
 	// SyncURL returns the git repository URL for Config Sync to sync from.
 	// name refers to the repo name in the format of <NAMESPACE>/<NAME> of RootSync|RepoSync.
@@ -58,6 +58,23 @@ type GitProviderOpts struct {
 func WithPortForwarder(portForwarder *portforwarder.PortForwarder) GitProviderOpt {
 	return func(opts *GitProviderOpts) {
 		opts.portForwarder = portForwarder
+	}
+}
+
+// RemoteURLOpt is an optional parameter for calling RemoteURL
+type RemoteURLOpt func(opts *RemoteURLOpts)
+
+// RemoteURLOpts is the set of optional parameters for calling RemoteURL
+type RemoteURLOpts struct {
+	localPort int
+}
+
+// WithLocalPort provides a localPort to use when constructing the RemoteURL.
+// This port is used by the local provider instead of getting the LocalPort from
+// the PortForwarder. This can be useful in certain scenarios to avoid deadlock.
+func WithLocalPort(localPort int) RemoteURLOpt {
+	return func(opts *RemoteURLOpts) {
+		opts.localPort = localPort
 	}
 }
 

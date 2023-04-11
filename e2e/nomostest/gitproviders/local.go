@@ -43,10 +43,18 @@ func (l *LocalProvider) Type() string {
 
 // RemoteURL returns the Git URL for connecting to the test git-server.
 // name refers to the repo name in the format of <NAMESPACE>/<NAME> of RootSync|RepoSync.
-func (l *LocalProvider) RemoteURL(name string) (string, error) {
-	port, err := l.portForwarder.LocalPort()
-	if err != nil {
-		return "", err
+func (l *LocalProvider) RemoteURL(name string, opts ...RemoteURLOpt) (string, error) {
+	options := &RemoteURLOpts{}
+	for _, opt := range opts {
+		opt(options)
+	}
+	port := options.localPort
+	if port == 0 {
+		var err error
+		port, err = l.portForwarder.LocalPort()
+		if err != nil {
+			return "", err
+		}
 	}
 	return fmt.Sprintf("ssh://git@localhost:%d/git-server/repos/%s", port, name), nil
 }

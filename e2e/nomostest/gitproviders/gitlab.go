@@ -56,7 +56,7 @@ func (g *GitlabClient) Type() string {
 }
 
 // RemoteURL returns the Git URL for the Gitlab project repository.
-func (g *GitlabClient) RemoteURL(name string) (string, error) {
+func (g *GitlabClient) RemoteURL(name string, _ ...RemoteURLOpt) (string, error) {
 	return g.SyncURL(name), nil
 }
 
