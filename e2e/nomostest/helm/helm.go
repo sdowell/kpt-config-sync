@@ -61,6 +61,7 @@ type RemoteHelmChart struct {
 func (r *RemoteHelmChart) CreateRepository() error {
 	out, err := r.Shell.ExecWithDebug("gcloud", "artifacts", "repositories",
 		"describe", r.RepositoryName,
+		"--project", r.Project,
 		"--location", r.Location)
 	if err != nil {
 		if !strings.Contains(string(out), "NOT_FOUND") {
@@ -76,6 +77,7 @@ func (r *RemoteHelmChart) CreateRepository() error {
 	_, err = r.Shell.ExecWithDebug("gcloud", "artifacts", "repositories",
 		"create", r.RepositoryName,
 		"--repository-format", "docker",
+		"--project", r.Project,
 		"--location", r.Location)
 	if err != nil {
 		return fmt.Errorf("failed to create image repository: %w", err)
@@ -219,7 +221,9 @@ func (r *RemoteHelmChart) Push() error {
 // Delete the package from the remote registry, including all versions and tags.
 func (r *RemoteHelmChart) Delete() error {
 	r.Logger.Infof("Deleting helm chart: %s", r.ChartName)
-	if _, err := r.Shell.ExecWithDebug("gcloud", "artifacts", "docker", "images", "delete", r.ChartAddress(), "--delete-tags"); err != nil {
+	_, err := r.Shell.ExecWithDebug("gcloud", "artifacts", "docker", "images", "delete",
+		r.ChartAddress(), "--delete-tags", "--project", r.Project)
+	if err != nil {
 		return fmt.Errorf("deleting helm chart image from registry: %w", err)
 	}
 	return nil
