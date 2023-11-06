@@ -208,7 +208,7 @@ func validateRootSyncDependencies(nt *nomostest.NT, rsName string) []client.Obje
 	// only happens when upgrading from a very old unsupported version.
 
 	rootSyncCRB := &rbacv1.ClusterRoleBinding{}
-	setNN(rootSyncCRB, client.ObjectKey{Name: controllers.RootSyncPermissionsName(rootSyncReconciler.Name)})
+	setNN(rootSyncCRB, client.ObjectKey{Name: controllers.RootSyncPermissionsName()})
 	rootSyncDependencies = append(rootSyncDependencies, rootSyncCRB)
 
 	rootSyncSA := &corev1.ServiceAccount{}

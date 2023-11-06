@@ -16,7 +16,6 @@ package core
 
 import (
 	"fmt"
-	"strings"
 
 	"kpt.dev/configsync/pkg/api/configsync"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -27,8 +26,6 @@ const (
 	NsReconcilerPrefix = "ns-reconciler"
 	// RootReconcilerPrefix is the prefix usef for all Root reconcilers.
 	RootReconcilerPrefix = "root-reconciler"
-	// RootSyncPermissionsPrefix is the prefix used for all ClusterRoleBindings granting access to Root Reconcilers
-	RootSyncPermissionsPrefix = configsync.RootSyncKind + ":" + RootReconcilerPrefix
 )
 
 // RootReconcilerName returns the root reconciler's name in the format root-reconciler-<name>.
@@ -38,17 +35,6 @@ func RootReconcilerName(name string) string {
 		return RootReconcilerPrefix
 	}
 	return fmt.Sprintf("%s-%s", RootReconcilerPrefix, name)
-}
-
-// RootSyncName returns the RootSync's name given the name of its reconciler.
-// It is the inverse of RootReconcilerName
-func RootSyncName(reconcilerName string) string {
-	if reconcilerName == RootReconcilerPrefix {
-		return configsync.RootSyncName
-	}
-
-	syncName, _ := strings.CutPrefix(reconcilerName, fmt.Sprintf("%s-", RootReconcilerPrefix))
-	return syncName
 }
 
 // NsReconcilerName returns the namespace reconciler's name in the format:
