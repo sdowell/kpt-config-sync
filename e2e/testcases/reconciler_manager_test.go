@@ -36,6 +36,7 @@ import (
 	"kpt.dev/configsync/e2e/nomostest/ntopts"
 	nomostesting "kpt.dev/configsync/e2e/nomostest/testing"
 	"kpt.dev/configsync/e2e/nomostest/testpredicates"
+	"kpt.dev/configsync/e2e/nomostest/testutils"
 	"kpt.dev/configsync/pkg/api/configsync"
 	"kpt.dev/configsync/pkg/api/configsync/v1beta1"
 	"kpt.dev/configsync/pkg/core"
@@ -105,6 +106,59 @@ func TestReconcilerManagerNormalTeardown(t *testing.T) {
 	t.Log("Validate the RepoSync reconciler and its dependencies were deleted")
 	for _, obj := range repoSyncDependencies {
 		validateObjectNotFound(nt, obj)
+	}
+}
+
+// TestReconcilerManagerTeardownWithReconcileTimeout validates that when a RootSync or
+// RepoSync is deleted, the reconciler-manager finalizer handles deletion of the
+// reconciler and its dependencies managed by the reconciler-manager even when
+// the deletions fail to reconcile.
+func TestReconcilerManagerTeardownWithReconcileTimeout(t *testing.T) {
+	nt := nomostest.New(t, nomostesting.ACMController,
+		ntopts.WithDelegatedControl, ntopts.Unstructured)
+
+	rootSync := &v1beta1.RootSync{}
+	rootSync.Name = configsync.RootSyncName
+	rootSync.Namespace = configsync.ControllerNamespace
+	rootSyncReconciler := &appsv1.Deployment{}
+	setNN(rootSyncReconciler, core.RootReconcilerObjectKey(rootSync.Name))
+	rootSyncSA := &corev1.ServiceAccount{}
+	setNN(rootSyncSA, client.ObjectKeyFromObject(rootSyncReconciler))
+	t.Log("Validate the Deployment exists")
+	if err := nt.Validate(rootSyncReconciler.Name, rootSyncReconciler.Namespace, rootSyncReconciler); err != nil {
+		nt.T.Fatal(err)
+	}
+	t.Log("Inject a fake finalizer in the Deployment to prevent deletion")
+	nt.T.Cleanup(func() {
+		rootSyncReconciler = &appsv1.Deployment{}
+		setNN(rootSyncReconciler, core.RootReconcilerObjectKey(rootSync.Name))
+		if err := nt.Validate(rootSyncReconciler.Name, rootSyncReconciler.Namespace, rootSyncReconciler); err != nil {
+			nt.T.Error(err)
+		}
+		testutils.RemoveFinalizer(rootSyncReconciler, nomostest.ConfigSyncE2EFinalizer)
+		if err := nt.KubeClient.Update(rootSyncReconciler); err != nil {
+			nt.T.Error(err)
+		}
+	})
+	testutils.AppendFinalizer(rootSyncReconciler, nomostest.ConfigSyncE2EFinalizer)
+	if err := nt.KubeClient.Update(rootSyncReconciler); err != nil {
+		nt.T.Fatal(err)
+	}
+	t.Log("Validate the ServiceAccount exists")
+	if err := nt.Validate(rootSyncSA.Name, rootSyncSA.Namespace, &corev1.ServiceAccount{}); err != nil {
+		nt.T.Fatal(err)
+	}
+	t.Log("Deleting the RootSync should cause managed resources to be deleted")
+	if err := nt.KubeClient.Delete(rootSync); err != nil {
+		nt.T.Fatal(err)
+	}
+	t.Log("The RootSync is deleted despite the Deployment finalizer")
+	if err := nt.Watcher.WatchForNotFound(kinds.RootSyncV1Beta1(), rootSync.Name, rootSync.Namespace); err != nil {
+		nt.T.Fatal(err)
+	}
+	t.Log("The ServiceAccount is orphaned")
+	if err := nt.Validate(rootSyncSA.Name, rootSyncSA.Namespace, &corev1.ServiceAccount{}); err != nil {
+		nt.T.Fatal(err)
 	}
 }
 
