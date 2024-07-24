@@ -24,8 +24,10 @@ import (
 
 	"go.uber.org/multierr"
 	"golang.org/x/exp/slices"
+	"k8s.io/klog/v2/textlogger"
 	"kpt.dev/configsync/e2e"
 	"kpt.dev/configsync/e2e/nomostest"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 // This is a bit of a hack to enforce our --num-clusters flag over the --test.parallel
@@ -101,6 +103,7 @@ func TestMain(m *testing.M) {
 func main(m *testing.M) int {
 	// This TestMain function is required in every e2e test case file.
 	flag.Parse()
+	ctrl.SetLogger(textlogger.NewLogger(textlogger.NewConfig()))
 
 	if !*e2e.E2E && !*e2e.Stress {
 		// This allows `go test ./...` to function as expected without triggering any long running tests.

@@ -21,6 +21,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
+	"k8s.io/klog/v2/textlogger"
 	"kpt.dev/configsync/cmd/nomos/bugreport"
 	"kpt.dev/configsync/cmd/nomos/hydrate"
 	"kpt.dev/configsync/cmd/nomos/initialize"
@@ -31,6 +32,7 @@ import (
 	"kpt.dev/configsync/pkg/api/configmanagement"
 	"kpt.dev/configsync/pkg/client/restconfig"
 	pkgversion "kpt.dev/configsync/pkg/version"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
@@ -68,6 +70,8 @@ func main() {
 
 	// Register klog flags
 	klog.InitFlags(fs)
+	// Configure controller-runtime logger for commands which create a client
+	ctrl.SetLogger(textlogger.NewLogger(textlogger.NewConfig()))
 
 	// Work around the controller-runtime init registering a --kubeconfig flag
 	// with no default value. Use the same default as kubectl instead.
