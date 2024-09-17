@@ -1,0 +1,141 @@
+{{- if .Values.preventDrift.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admission-webhook
+  namespace: config-management-system
+  labels:
+    app: admission-webhook
+    configmanagement.gke.io/system: "true"
+    configmanagement.gke.io/arch: "csmr"
+spec:
+  minReadySeconds: 10
+  selector:
+    matchLabels:
+      app: admission-webhook
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: admission-webhook
+    spec:
+      serviceAccountName: admission-webhook
+      containers:
+      - name: admission-webhook
+        command:
+        - /admission-webhook
+        - --graceful-shutdown-timeout=10s
+        - --health-probe-bind-addr=:10258
+        image: {{ .Values.image.repository }}/admission-webhook:v1.19.0
+        ports:
+          - name: admission
+            containerPort: 10250
+            protocol: TCP
+          - name: readyz
+            containerPort: 10258
+            protocol: TCP
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 10m
+            memory: 100Mi
+          limits:
+            cpu: 1
+            memory: 2Gi
+        volumeMounts:
+          - mountPath: /certs
+            name: cert
+            readOnly: true
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: readyz
+            scheme: HTTP
+          periodSeconds: 1
+          failureThreshold: 3
+          successThreshold: 1
+          timeoutSeconds: 1
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: cert
+        secret:
+          defaultMode: 420
+          secretName: admission-webhook-cert
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admission-webhook
+  namespace: config-management-system
+  labels:
+    app: admission-webhook
+    monitored: "true"
+    configmanagement.gke.io/system: "true"
+    configmanagement.gke.io/arch: "csmr"
+spec:
+  selector:
+    app: admission-webhook
+  ports:
+  - name: admission
+    port: 443
+    targetPort: admission
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admission-webhook
+  namespace: config-management-system
+  labels:
+    app: admission-webhook
+    configmanagement.gke.io/system: "true"
+    configmanagement.gke.io/arch: "csmr"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: configsync.gke.io:admission-webhook
+  labels:
+    app: admission-webhook
+    configmanagement.gke.io/system: "true"
+    configmanagement.gke.io/arch: "csmr"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  # The admission webhook must be cluster-admin in order to deny requests to any
+  # object on the cluster.
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: admission-webhook
+  namespace: config-management-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: admission-webhook-cert
+  namespace: config-management-system
+  labels:
+    app: admission-webhook
+    configmanagement.gke.io/system: "true"
+    configmanagement.gke.io/arch: "csmr"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: admission-webhook.configsync.gke.io
+  labels:
+    app: admission-webhook
+    configmanagement.gke.io/system: "true"
+    configmanagement.gke.io/arch: "csmr"
+{{- end }}

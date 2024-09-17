@@ -67,6 +67,16 @@ spec:
   - name: metrics # Prometheus exporter metrics.
     port: 8675
 ---
+apiVersion: v1
+kind: ServiceAccount # Included so that GSA annotation can be injected w/ kustomize
+metadata:
+  name: default # default ServiceAccount for backwards compatibility
+  namespace: config-management-monitoring
+  annotations:
+  labels:
+    configmanagement.gke.io/system: "true"
+    configmanagement.gke.io/arch: "csmr"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

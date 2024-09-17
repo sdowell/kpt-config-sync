@@ -1,0 +1,15 @@
+# Default values for config-sync.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+preventDrift:
+  enabled: false
+
+clusterName: ""
+
+verbosity: ""
+
+googleServiceAccount: ""
+
+image:
+  repository: gcr.io/config-management-release
