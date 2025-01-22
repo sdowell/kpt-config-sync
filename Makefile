@@ -169,6 +169,7 @@ HELM_SYNC_IMAGE := helm-sync
 NOMOS_IMAGE := nomos
 ASKPASS_IMAGE := gcenode-askpass-sidecar
 RESOURCE_GROUP_IMAGE := resource-group-controller
+OPENTELEMETRY_IMAGE := opentelemetry
 # List of Config Sync images. Used to generate image-related variables/targets.
 IMAGES := \
 	$(RECONCILER_IMAGE) \
@@ -180,7 +181,8 @@ IMAGES := \
 	$(HELM_SYNC_IMAGE) \
 	$(NOMOS_IMAGE) \
 	$(ASKPASS_IMAGE) \
-	$(RESOURCE_GROUP_IMAGE)
+	$(RESOURCE_GROUP_IMAGE) \
+	$(OPENTELEMETRY_IMAGE)
 
 # nomos binary for local run.
 NOMOS_LOCAL := $(BIN_DIR)/linux_amd64/nomos
@@ -198,7 +200,7 @@ endif
 #
 # To turn off, for example:
 #   make DOCKER_BUILD_QUIET="" deploy
-DOCKER_BUILD_QUIET ?= --quiet
+DOCKER_BUILD_QUIET ?= "--no-cache"
 
 # Suppresses gcloud output.
 GCLOUD_QUIET := --quiet

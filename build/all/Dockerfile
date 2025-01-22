@@ -38,7 +38,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on \
     ./cmd/oci-sync \
     ./cmd/helm-sync \
     ./cmd/gcenode-askpass-sidecar \
-    ./cmd/resource-group
+    ./cmd/resource-group \
+    ./cmd/opentelemetry
 
 
 # Concatenate vendored licenses into LICENSES.txt
@@ -152,6 +153,16 @@ COPY --from=bins /workspace/LICENSE LICENSE
 COPY --from=bins /workspace/LICENSES.txt LICENSES.txt
 USER nonroot:nonroot
 ENTRYPOINT ["/resource-group"]
+
+# Opentelemetry image
+FROM gcr.io/distroless/static:nonroot as opentelemetry
+WORKDIR /
+COPY --from=bins /go/bin/opentelemetry opentelemetry
+COPY --from=bins /workspace/LICENSE LICENSE
+COPY --from=bins /workspace/LICENSES.txt LICENSES.txt
+EXPOSE 13133 55678
+ENTRYPOINT ["/otelcontribcol"]
+CMD ["--config", "/etc/otel/config.yaml"]
 
 # Nomos image
 # Not used by Config Sync backend components. Intended for use cases with the
