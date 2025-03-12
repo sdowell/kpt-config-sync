@@ -26,15 +26,12 @@ import (
 	nomostesting "kpt.dev/configsync/e2e/nomostest/testing"
 	"kpt.dev/configsync/e2e/nomostest/testpredicates"
 	"kpt.dev/configsync/e2e/nomostest/testresourcegroup"
-	"kpt.dev/configsync/e2e/nomostest/testutils"
 	"kpt.dev/configsync/e2e/nomostest/testwatcher"
-	"kpt.dev/configsync/pkg/api/configmanagement"
 	"kpt.dev/configsync/pkg/api/configsync"
 	"kpt.dev/configsync/pkg/api/kpt.dev/v1alpha1"
 	"kpt.dev/configsync/pkg/core"
 	"kpt.dev/configsync/pkg/core/k8sobjects"
 	"kpt.dev/configsync/pkg/kinds"
-	"kpt.dev/configsync/pkg/reconcilermanager"
 	"kpt.dev/configsync/pkg/resourcegroup"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -42,11 +39,6 @@ import (
 func TestResourceGroupController(t *testing.T) {
 	nt := nomostest.New(t, nomostesting.ACMController)
 	rootSyncGitRepo := nt.SyncSourceGitReadWriteRepository(nomostest.DefaultRootSyncID)
-
-	nt.Must(testutils.UpdateRootSyncReconcilerLogLevel(nt,
-		configsync.RootSyncName, reconcilermanager.Reconciler, 5))
-	nt.Must(testutils.UpdateDeploymentContainerVerbosityArg(nt,
-		configmanagement.RGControllerName, configmanagement.RGControllerNamespace, resourcegroup.ManagerContainerName, 5))
 
 	ns := "rg-test"
 	nt.Must(rootSyncGitRepo.Add(
@@ -69,11 +61,6 @@ func TestResourceGroupController(t *testing.T) {
 
 func TestResourceGroupControllerInKptGroup(t *testing.T) {
 	nt := nomostest.New(t, nomostesting.ACMController)
-
-	nt.Must(testutils.UpdateRootSyncReconcilerLogLevel(nt,
-		configsync.RootSyncName, reconcilermanager.Reconciler, 5))
-	nt.Must(testutils.UpdateDeploymentContainerVerbosityArg(nt,
-		configmanagement.RGControllerName, configmanagement.RGControllerNamespace, resourcegroup.ManagerContainerName, 5))
 
 	namespace := "resourcegroup-e2e"
 	nt.T.Cleanup(func() {
@@ -244,11 +231,6 @@ func TestResourceGroupControllerInKptGroup(t *testing.T) {
 func TestResourceGroupCustomResource(t *testing.T) {
 	nt := nomostest.New(t, nomostesting.ACMController)
 
-	nt.Must(testutils.UpdateRootSyncReconcilerLogLevel(nt,
-		configsync.RootSyncName, reconcilermanager.Reconciler, 5))
-	nt.Must(testutils.UpdateDeploymentContainerVerbosityArg(nt,
-		configmanagement.RGControllerName, configmanagement.RGControllerNamespace, resourcegroup.ManagerContainerName, 5))
-
 	namespace := "resourcegroup-e2e"
 	nt.T.Cleanup(func() {
 		ns := k8sobjects.NamespaceObject(namespace)
@@ -372,11 +354,6 @@ func TestResourceGroupCustomResource(t *testing.T) {
 
 func TestResourceGroupApplyStatus(t *testing.T) {
 	nt := nomostest.New(t, nomostesting.ACMController)
-
-	nt.Must(testutils.UpdateRootSyncReconcilerLogLevel(nt,
-		configsync.RootSyncName, reconcilermanager.Reconciler, 5))
-	nt.Must(testutils.UpdateDeploymentContainerVerbosityArg(nt,
-		configmanagement.RGControllerName, configmanagement.RGControllerNamespace, resourcegroup.ManagerContainerName, 5))
 
 	namespace := "resourcegroup-e2e"
 	nt.T.Cleanup(func() {
