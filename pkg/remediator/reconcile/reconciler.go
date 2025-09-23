@@ -131,14 +131,14 @@ func (r *reconciler) remediate(ctx context.Context, id core.ID, objDiff diff.Dif
 		newManager := declared.ResourceManager(r.scope, r.syncName)
 		return status.ManagementConflictErrorWrap(objDiff.Actual, newManager)
 	case diff.Create:
-		declared, err := objDiff.UnstructuredDeclared()
+		declU, err := objDiff.UnstructuredDeclared()
 		if err != nil {
 			return err
 		}
 		klog.V(3).Infof("Remediator creating object: %v", id)
-		return r.applier.Create(ctx, declared)
+		return r.applier.Create(ctx, declU)
 	case diff.Update:
-		declared, err := objDiff.UnstructuredDeclared()
+		declU, err := objDiff.UnstructuredDeclared()
 		if err != nil {
 			return err
 		}
@@ -147,7 +147,7 @@ func (r *reconciler) remediate(ctx context.Context, id core.ID, objDiff diff.Dif
 			return err
 		}
 		klog.V(3).Infof("Remediator updating object: %v", id)
-		return r.applier.Update(ctx, declared, actual)
+		return r.applier.Update(ctx, declU, actual)
 	case diff.Delete:
 		actual, err := objDiff.UnstructuredActual()
 		if err != nil {
@@ -170,7 +170,8 @@ func (r *reconciler) remediate(ctx context.Context, id core.ID, objDiff diff.Dif
 		klog.V(3).Infof("Remediator abandoning object %v", id)
 		return r.applier.RemoveNomosMeta(ctx, actual, metrics.RemediatorController)
 	case diff.UpdateCSMetadata:
-		declared, err := objDiff.UnstructuredDeclared()
+		// TODO: This can be optimized by using PartialObjectMetadata instead of Unstructured
+		declU, err := objDiff.UnstructuredDeclared()
 		if err != nil {
 			return err
 		}
@@ -184,12 +185,15 @@ func (r *reconciler) remediate(ctx context.Context, id core.ID, objDiff diff.Dif
 			return err
 		}
 
-		metadata.UpdateConfigSyncMetadata(declared, expected)
+		updated := metadata.UpdateConfigSyncMetadata(declU, expected)
 
 		// This is necessary as otherwise, the annotation won't be removed when using SSA
-		if declared.GetAnnotations()[metadata.LifecycleMutationAnnotation] == "" &&
+		if declU.GetAnnotations()[metadata.LifecycleMutationAnnotation] == "" &&
 			expected.GetAnnotations()[metadata.LifecycleMutationAnnotation] == metadata.IgnoreMutation {
-			core.SetAnnotation(expected, metadata.LifecycleMutationAnnotation, "")
+			updated = core.SetAnnotation(expected, metadata.LifecycleMutationAnnotation, "") || updated
+		}
+		if !updated { // No-op, skip Update call (optimization)
+			return nil
 		}
 
 		return r.applier.Update(ctx, expected, actual)
