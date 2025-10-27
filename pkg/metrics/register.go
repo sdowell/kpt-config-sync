@@ -39,6 +39,9 @@ func RegisterOCAgentExporter(containerName string) (*ocagent.Exporter, error) {
 	}
 
 	view.RegisterExporter(oce)
+	if err := initializeMetrics(); err != nil {
+		return nil, err
+	}
 	return oce, nil
 }
 

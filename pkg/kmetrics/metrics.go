@@ -22,62 +22,85 @@ import (
 
 var (
 	// KustomizeFieldCount is the number of times a particular field is used
+	KustomizeFieldCount *stats.Int64Measure
+
+	// KustomizeDeprecatingFields is the usage of fields that may become deprecated
+	KustomizeDeprecatingFields *stats.Int64Measure
+
+	// KustomizeSimplification is the usage of simplification transformers
+	KustomizeSimplification *stats.Int64Measure
+
+	// KustomizeK8sMetadata is the usage of builtin transformers
+	KustomizeK8sMetadata *stats.Int64Measure
+
+	// KustomizeHelmMetrics is the usage of helm
+	KustomizeHelmMetrics *stats.Int64Measure
+
+	// KustomizeBaseCount is the number of remote and local bases
+	KustomizeBaseCount *stats.Int64Measure
+
+	// KustomizePatchCount is the number of patches
+	KustomizePatchCount *stats.Int64Measure
+
+	// KustomizeTopTierMetrics is the usage of high level metrics
+	KustomizeTopTierMetrics *stats.Int64Measure
+
+	// KustomizeResourceCount is the number of resources outputted by `kustomize build`
+	KustomizeResourceCount *stats.Int64Measure
+
+	// KustomizeExecutionTime is the execution time of `kustomize build`
+	KustomizeExecutionTime *stats.Float64Measure
+)
+
+func initializeMetrics() error {
 	KustomizeFieldCount = stats.Int64(
 		"kustomize_field_count",
 		"The number of times a particular field is used in the kustomization files",
 		stats.UnitDimensionless)
 
-	// KustomizeDeprecatingFields is the usage of fields that may become deprecated
 	KustomizeDeprecatingFields = stats.Int64(
 		"kustomize_deprecating_field_count",
 		"The usage of fields that may become deprecated",
 		stats.UnitDimensionless)
 
-	// KustomizeSimplification is the usage of simplification transformers
 	KustomizeSimplification = stats.Int64(
 		"kustomize_simplification_adoption_count",
 		"The usage of simplification transformers images, replicas, and replacements",
 		stats.UnitDimensionless)
 
-	// KustomizeK8sMetadata is the usage of builtin transformers
 	KustomizeK8sMetadata = stats.Int64(
 		"kustomize_builtin_transformers",
 		"The usage of builtin transformers related to kubernetes object metadata",
 		stats.UnitDimensionless)
 
-	// KustomizeHelmMetrics is the usage of helm
 	KustomizeHelmMetrics = stats.Int64(
 		"kustomize_helm_inflator_count",
 		"The usage of helm in kustomize, whether by the builtin fields or the custom function",
 		stats.UnitDimensionless)
 
-	// KustomizeBaseCount is the number of remote and local bases
 	KustomizeBaseCount = stats.Int64(
 		"kustomize_base_count",
 		"The number of remote and local bases",
 		stats.UnitDimensionless)
 
-	// KustomizePatchCount is the number of patches
 	KustomizePatchCount = stats.Int64(
 		"kustomize_patch_count",
 		"The number of patches in the fields `patches`, `patchesStrategicMerge`, and `patchesJson6902`",
 		stats.UnitDimensionless)
 
-	// KustomizeTopTierMetrics is the usage of high level metrics
 	KustomizeTopTierMetrics = stats.Int64(
 		"kustomize_ordered_top_tier_metrics",
 		"Usage of Resources, Generators, SecretGenerator, ConfigMapGenerator, Transformers, and Validators",
 		stats.UnitDimensionless)
 
-	// KustomizeResourceCount is the number of resources outputted by `kustomize build`
 	KustomizeResourceCount = stats.Int64(
 		"kustomize_resource_count",
 		"The number of resources outputted by `kustomize build`",
 		stats.UnitDimensionless)
 
-	// KustomizeExecutionTime is the execution time of `kustomize build`
 	KustomizeExecutionTime = stats.Float64(
 		"kustomize_build_latency",
 		"Kustomize build latency",
 		stats.UnitMilliseconds)
-)
+	return nil
+}

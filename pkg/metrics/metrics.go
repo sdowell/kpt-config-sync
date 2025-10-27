@@ -14,7 +14,9 @@
 
 package metrics
 
-import "go.opencensus.io/stats"
+import (
+	"go.opencensus.io/stats"
+)
 
 const (
 	// APICallDurationName is the name of API duration metric
@@ -49,89 +51,120 @@ const (
 
 var (
 	// APICallDuration metric measures the latency of API server calls.
-	APICallDuration = stats.Float64(
-		APICallDurationName,
-		"The duration of API server calls in seconds",
-		stats.UnitSeconds)
+	APICallDuration *stats.Float64Measure
 
 	// ReconcilerErrors metric measures the number of errors in the reconciler.
-	ReconcilerErrors = stats.Int64(
-		ReconcilerErrorsName,
-		"The number of errors in the reconciler",
-		stats.UnitDimensionless)
+	ReconcilerErrors *stats.Int64Measure
 
 	// PipelineError metric measures the error by components when syncing a commit.
 	// Definition here must exactly match the definition in the resource-group
 	// controller, or the Prometheus exporter will error. b/247516388
 	// https://github.com/GoogleContainerTools/kpt-resource-group/blob/main/controllers/metrics/metrics.go#L88
+	PipelineError *stats.Int64Measure
+
+	// ReconcileDuration metric measures the latency of reconcile events.
+	ReconcileDuration *stats.Float64Measure
+
+	// ParserDuration metric measures the latency of the parse-apply-watch loop.
+	ParserDuration *stats.Float64Measure
+
+	// LastSync metric measures the timestamp of the latest Git sync.
+	LastSync *stats.Int64Measure
+
+	// DeclaredResources metric measures the number of declared resources parsed from Git.
+	DeclaredResources *stats.Int64Measure
+
+	// ApplyOperations metric measures the number of applier apply events.
+	ApplyOperations *stats.Int64Measure
+
+	// ApplyDuration metric measures the latency of applier apply events.
+	ApplyDuration *stats.Float64Measure
+
+	// ResourceFights metric measures the number of resource fights.
+	ResourceFights *stats.Int64Measure
+
+	// RemediateDuration metric measures the latency of remediator reconciliation events.
+	RemediateDuration *stats.Float64Measure
+
+	// LastApply metric measures the timestamp of the most recent applier apply event.
+	LastApply *stats.Int64Measure
+
+	// ResourceConflicts metric measures the number of resource conflicts.
+	ResourceConflicts *stats.Int64Measure
+
+	// InternalErrors metric measures the number of unexpected internal errors triggered by defensive checks in Config Sync.
+	InternalErrors *stats.Int64Measure
+)
+
+func initializeMetrics() error {
+	APICallDuration = stats.Float64(
+		APICallDurationName,
+		"The duration of API server calls in seconds",
+		stats.UnitSeconds)
+
+	ReconcilerErrors = stats.Int64(
+		ReconcilerErrorsName,
+		"The number of errors in the reconciler",
+		stats.UnitDimensionless)
+
 	PipelineError = stats.Int64(
 		PipelineErrorName,
 		"A boolean value indicates if error happened at readiness stage when syncing a commit",
 		stats.UnitDimensionless)
 
-	// ReconcileDuration metric measures the latency of reconcile events.
 	ReconcileDuration = stats.Float64(
 		ReconcileDurationName,
 		"The duration of reconcile events in seconds",
 		stats.UnitSeconds)
 
-	// ParserDuration metric measures the latency of the parse-apply-watch loop.
 	ParserDuration = stats.Float64(
 		ParserDurationName,
 		"The duration of the parse-apply-watch loop in seconds",
 		stats.UnitSeconds)
 
-	// LastSync metric measures the timestamp of the latest Git sync.
 	LastSync = stats.Int64(
 		LastSyncName,
 		"The timestamp of the most recent sync from Git",
 		stats.UnitDimensionless)
 
-	// DeclaredResources metric measures the number of declared resources parsed from Git.
 	DeclaredResources = stats.Int64(
 		DeclaredResourcesName,
 		"The number of declared resources parsed from Git",
 		stats.UnitDimensionless)
 
-	// ApplyOperations metric measures the number of applier apply events.
 	ApplyOperations = stats.Int64(
 		ApplyOperationsName,
 		"The number of operations that have been performed to sync resources to source of truth",
 		stats.UnitDimensionless)
 
-	// ApplyDuration metric measures the latency of applier apply events.
 	ApplyDuration = stats.Float64(
 		ApplyDurationName,
 		"The duration of applier events in seconds",
 		stats.UnitSeconds)
 
-	// ResourceFights metric measures the number of resource fights.
 	ResourceFights = stats.Int64(
 		ResourceFightsName,
 		"The number of resources that are being synced too frequently",
 		stats.UnitDimensionless)
 
-	// RemediateDuration metric measures the latency of remediator reconciliation events.
 	RemediateDuration = stats.Float64(
 		RemediateDurationName,
 		"The duration of remediator reconciliation events",
 		stats.UnitSeconds)
 
-	// LastApply metric measures the timestamp of the most recent applier apply event.
 	LastApply = stats.Int64(
 		LastApplyName,
 		"The timestamp of the most recent applier event",
 		stats.UnitDimensionless)
 
-	// ResourceConflicts metric measures the number of resource conflicts.
 	ResourceConflicts = stats.Int64(
 		ResourceConflictsName,
 		"The number of resource conflicts resulting from a mismatch between the cached resources and cluster resources",
 		stats.UnitDimensionless)
 
-	// InternalErrors metric measures the number of unexpected internal errors triggered by defensive checks in Config Sync.
 	InternalErrors = stats.Int64(
 		InternalErrorsName,
 		"The number of internal errors triggered by Config Sync",
 		stats.UnitDimensionless)
-)
+	return nil
+}
