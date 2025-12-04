@@ -21,7 +21,6 @@ import (
 	"github.com/GoogleContainerTools/config-sync/cmd/nomos/flags"
 	"github.com/GoogleContainerTools/config-sync/pkg/api/configsync"
 	"github.com/GoogleContainerTools/config-sync/pkg/importer/analyzer/validation/system"
-	"github.com/GoogleContainerTools/config-sync/pkg/util/gvkutil"
 	"github.com/spf13/cobra"
 )
 
@@ -78,10 +77,10 @@ returns a non-zero error code if any issues are found.
   nomos vet --path=/path/to/my/directory`,
 	Args: cobra.ExactArgs(0),
 	PreRunE: func(cmd *cobra.Command, _ []string) error {
-		if flags.SkipAPIServer && len(flags.NoAPIServerCheckForGroup) > 0 {
+		if flags.SkipAPIServer && len(flags.SkipAPIServerCheckForGroup) > 0 {
 			// If --no-api-server-check is specified, ignore --no-api-server-check-for-group.
 			_, _ = fmt.Fprintf(cmd.OutOrStderr(), "Warning: --%s is specified, so --%s will be ignored.\n", flags.SkipAPIServerFlag, flags.NoAPIServerCheckForGroupFlag)
-			flags.NoAPIServerCheckForGroup = nil
+			flags.SkipAPIServerCheckForGroup = nil
 		}
 		return nil
 	},
@@ -89,17 +88,11 @@ returns a non-zero error code if any issues are found.
 		// Don't show usage on error, as argument validation passed.
 		cmd.SilenceUsage = true
 
-		skippedGVKs, err := gvkutil.ParsePatterns(flags.NoAPIServerCheckForGroup)
-		if err != nil {
-			return err
-		}
-
 		return runVet(cmd.Context(), cmd.OutOrStderr(), vetOptions{
 			Namespace:        namespaceValue,
 			SourceFormat:     configsync.SourceFormat(flags.SourceFormat),
 			APIServerTimeout: flags.APIServerTimeout,
 			MaxObjectCount:   threshold,
-			SkippedGVKs:      skippedGVKs,
 		})
 	},
 }

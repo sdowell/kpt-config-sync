@@ -15,6 +15,8 @@
 package fileobjects
 
 import (
+	"slices"
+
 	"github.com/GoogleContainerTools/config-sync/pkg/declared"
 	"github.com/GoogleContainerTools/config-sync/pkg/importer/analyzer/ast"
 	"github.com/GoogleContainerTools/config-sync/pkg/importer/customresources"
@@ -22,9 +24,9 @@ import (
 	"github.com/GoogleContainerTools/config-sync/pkg/reconciler/namespacecontroller"
 	"github.com/GoogleContainerTools/config-sync/pkg/status"
 	utildiscovery "github.com/GoogleContainerTools/config-sync/pkg/util/discovery"
-	"github.com/GoogleContainerTools/config-sync/pkg/util/gvkutil"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/klog/v2"
 )
 
@@ -37,16 +39,15 @@ type ObjectVisitor func(obj ast.FileObject) status.Error
 // Raw contains a collection of FileObjects that have just been parsed from a
 // Git repo for a cluster.
 type Raw struct {
-	ClusterName       string
-	Scope             declared.Scope
-	SyncName          string
-	PolicyDir         cmpath.Relative
-	Objects           []ast.FileObject
-	PreviousCRDs      []*apiextensionsv1.CustomResourceDefinition
-	BuildScoper       utildiscovery.BuildScoperFunc
-	Converter         *declared.ValueConverter
-	Scheme            *runtime.Scheme
-	AllowUnknownKinds bool
+	ClusterName  string
+	Scope        declared.Scope
+	SyncName     string
+	PolicyDir    cmpath.Relative
+	Objects      []ast.FileObject
+	PreviousCRDs []*apiextensionsv1.CustomResourceDefinition
+	BuildScoper  utildiscovery.BuildScoperFunc
+	Converter    *declared.ValueConverter
+	Scheme       *runtime.Scheme
 	// AllowAPICall indicates whether the hydration process can send k8s API
 	// calls. Currently, only dynamic NamespaceSelector requires talking to
 	// k8s-api-server.
@@ -59,8 +60,9 @@ type Raw struct {
 	NSControllerState *namespacecontroller.State
 	// WebhookEnabled indicates whether Webhook configuration is enabled
 	WebhookEnabled bool
-	// SkippedGVKs is a list of GVK patterns to skip API server validation for.
-	SkippedGVKs []gvkutil.Pattern
+	// AllowUnknownKindMatcher indicates which object kinds do not need to ignore
+	// scoper errors for when getting the object scope from the API server.
+	AllowUnknownKindMatcher ObjectMatcher
 }
 
 // Scoped builds a Scoped collection of objects from the Raw objects.
@@ -85,16 +87,7 @@ func (r *Raw) Scoped() (*Scoped, status.MultiError) {
 	for _, obj := range r.Objects {
 		s, err := scoper.GetObjectScope(obj)
 		if err != nil {
-			// For objects with matching GVKs, all errors from scoper.GetObjectScope are skipped.
-			// This includes, but is not limited to, unknown GVK errors such as KNV1021.
-			gk := obj.GroupVersionKind().GroupKind()
-
-			if gvkutil.Matches(gk, r.SkippedGVKs) {
-				klog.V(6).Infof("ignoring KNV1021 error for %s/%s due to --no-api-server-check-for-group flag: %v", gk.Group, gk.Kind, err)
-				continue // Skip appending this error
-			}
-
-			if r.AllowUnknownKinds {
+			if r.AllowUnknownKindMatcher != nil && r.AllowUnknownKindMatcher.Matches(obj.GroupVersionKind()) {
 				klog.V(6).Infof("ignoring error: %v", err)
 			} else {
 				errs = status.Append(errs, err)
@@ -125,4 +118,22 @@ func VisitAllRaw(visit ObjectVisitor) RawVisitor {
 		}
 		return errs
 	}
+}
+
+type ObjectMatcher interface {
+	Matches(schema.GroupVersionKind) bool
+}
+
+type GroupMatcher struct {
+	Groups []string
+}
+
+func (gm *GroupMatcher) Matches(gvk schema.GroupVersionKind) bool {
+	return slices.Contains(gm.Groups, gvk.Group)
+}
+
+type MatchAll struct{}
+
+func (m *MatchAll) Matches(_ schema.GroupVersionKind) bool {
+	return true
 }

@@ -23,7 +23,6 @@ import (
 	"github.com/GoogleContainerTools/config-sync/pkg/reconciler/namespacecontroller"
 	"github.com/GoogleContainerTools/config-sync/pkg/status"
 	"github.com/GoogleContainerTools/config-sync/pkg/util/discovery"
-	"github.com/GoogleContainerTools/config-sync/pkg/util/gvkutil"
 	"github.com/GoogleContainerTools/config-sync/pkg/validate/fileobjects"
 	"github.com/GoogleContainerTools/config-sync/pkg/validate/final"
 	"github.com/GoogleContainerTools/config-sync/pkg/validate/raw"
@@ -67,11 +66,6 @@ type Options struct {
 	Converter *declared.ValueConverter
 	// Scheme used to convert between types.
 	Scheme *runtime.Scheme
-	// AllowUnknownKinds is a flag to determine if we should throw an error or
-	// proceed when the Scoper is unable to determine the scope of an object
-	// kind. We only set this to true if a tool is running in offline mode (eg we
-	// are running nomos vet without contacting the API server).
-	AllowUnknownKinds bool
 	// Visitors is a list of optional visitor functions which can be used to
 	// inject additional validation or hydration steps on the final objects.
 	Visitors []VisitorFunc
@@ -92,8 +86,10 @@ type Options struct {
 	// MaxObjectCount is the maximum number of objects allowed in a single
 	// inventory. Validation is skipped when less than 1.
 	MaxObjectCount int
-	// SkippedGVKs is a list of GVK patterns to skip API server validation for.
-	SkippedGVKs []gvkutil.Pattern
+	// AllowUnknownKindMatcher is an interface to determine if we should throw an error or
+	// proceed when the Scoper is unable to determine the scope of an object
+	// kind.
+	AllowUnknownKindMatcher fileobjects.ObjectMatcher
 }
 
 // Hierarchical validates and hydrates the given FileObjects from a structured,
@@ -107,18 +103,17 @@ func Hierarchical(objs []ast.FileObject, opts Options) ([]ast.FileObject, status
 	//   - filtering out resources whose cluster selector does not match
 	//   - adding metadata to resources (such as their filepath in the repo)
 	rawObjects := &fileobjects.Raw{
-		ClusterName:       opts.ClusterName,
-		Scope:             opts.Scope,
-		SyncName:          opts.SyncName,
-		PolicyDir:         opts.PolicyDir,
-		Objects:           objs,
-		PreviousCRDs:      opts.PreviousCRDs,
-		BuildScoper:       opts.BuildScoper,
-		Converter:         opts.Converter,
-		Scheme:            opts.Scheme,
-		AllowUnknownKinds: opts.AllowUnknownKinds,
-		WebhookEnabled:    opts.WebhookEnabled,
-		SkippedGVKs:       opts.SkippedGVKs,
+		ClusterName:             opts.ClusterName,
+		Scope:                   opts.Scope,
+		SyncName:                opts.SyncName,
+		PolicyDir:               opts.PolicyDir,
+		Objects:                 objs,
+		PreviousCRDs:            opts.PreviousCRDs,
+		BuildScoper:             opts.BuildScoper,
+		Converter:               opts.Converter,
+		Scheme:                  opts.Scheme,
+		WebhookEnabled:          opts.WebhookEnabled,
+		AllowUnknownKindMatcher: opts.AllowUnknownKindMatcher,
 	}
 
 	// nonBlockingErrs tracks the errors which do not block the apply stage
@@ -204,12 +199,11 @@ func Unstructured(ctx context.Context, c client.Client, objs []ast.FileObject, o
 		BuildScoper:              opts.BuildScoper,
 		Converter:                opts.Converter,
 		Scheme:                   opts.Scheme,
-		AllowUnknownKinds:        opts.AllowUnknownKinds,
 		AllowAPICall:             opts.AllowAPICall,
 		DynamicNSSelectorEnabled: opts.DynamicNSSelectorEnabled,
 		NSControllerState:        opts.NSControllerState,
 		WebhookEnabled:           opts.WebhookEnabled,
-		SkippedGVKs:              opts.SkippedGVKs,
+		AllowUnknownKindMatcher:  opts.AllowUnknownKindMatcher,
 	}
 
 	// nonBlockingErrs tracks the errors which do not block the apply stage

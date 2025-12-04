@@ -36,7 +36,6 @@ import (
 	"github.com/GoogleContainerTools/config-sync/pkg/parse"
 	"github.com/GoogleContainerTools/config-sync/pkg/reconcilermanager"
 	"github.com/GoogleContainerTools/config-sync/pkg/status"
-	"github.com/GoogleContainerTools/config-sync/pkg/util/gvkutil"
 )
 
 type vetOptions struct {
@@ -44,7 +43,6 @@ type vetOptions struct {
 	SourceFormat     configsync.SourceFormat
 	APIServerTimeout time.Duration
 	MaxObjectCount   int
-	SkippedGVKs      []gvkutil.Pattern
 }
 
 // vet runs nomos vet with the specified options.
@@ -104,7 +102,6 @@ func runVet(ctx context.Context, out io.Writer, opts vetOptions) error {
 	}
 	validateOpts.FieldManager = util.FieldManager
 	validateOpts.MaxObjectCount = opts.MaxObjectCount
-	validateOpts.SkippedGVKs = opts.SkippedGVKs
 
 	switch sourceFormat {
 	case configsync.SourceFormatHierarchy:

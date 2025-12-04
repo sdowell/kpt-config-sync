@@ -51,12 +51,12 @@ func resetFlags() {
 	keepOutput = false
 	outPath = flags.DefaultHydrationOutput
 	flags.OutputFormat = flags.OutputYAML
-	flags.NoAPIServerCheckForGroup = nil
+	flags.SkipAPIServerCheckForGroup = nil
 }
 
 func resetFlagExclusivityTestFlags() {
 	flags.SkipAPIServer = false
-	flags.NoAPIServerCheckForGroup = nil
+	flags.SkipAPIServerCheckForGroup = nil
 }
 
 var examplesDir = cmpath.RelativeSlash("../../../examples")
@@ -245,9 +245,9 @@ func TestVet_FlagExclusivity(t *testing.T) {
 					groups = append(groups, strings.Split(parts[1], ",")...)
 				}
 			}
-			flags.NoAPIServerCheckForGroup = groups
+			flags.SkipAPIServerCheckForGroup = groups
 			if tc.initialNoAPIServerGroups != nil {
-				flags.NoAPIServerCheckForGroup = tc.initialNoAPIServerGroups
+				flags.SkipAPIServerCheckForGroup = tc.initialNoAPIServerGroups
 			}
 
 			output := new(bytes.Buffer)
@@ -268,7 +268,7 @@ func TestVet_FlagExclusivity(t *testing.T) {
 			}
 
 			if tc.expectGroupsToBeNil {
-				require.Nil(t, flags.NoAPIServerCheckForGroup)
+				require.Nil(t, flags.SkipAPIServerCheckForGroup)
 			}
 		})
 	}
